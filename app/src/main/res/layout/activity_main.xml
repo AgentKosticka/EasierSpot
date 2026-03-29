@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:gravity="center"
+    android:padding="16dp">
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="EasierSpot"
+        android:textSize="32sp"
+        android:textStyle="bold"
+        android:gravity="center"
+        android:layout_marginBottom="32dp" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Select Mode"
+        android:textSize="18sp"
+        android:gravity="center"
+        android:layout_marginBottom="24dp" />
+
+    <Button
+        android:id="@+id/btn_client_mode"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Connect to Hotspot (Client)"
+        android:layout_marginBottom="16dp"
+        android:padding="16dp" />
+
+    <Button
+        android:id="@+id/btn_server_mode"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Share Hotspot (Server)"
+        android:padding="16dp" />
+
+</LinearLayout>

@@ -1,0 +1,386 @@
+package com.agentkosticka.easierspot.service
+
+import android.annotation.SuppressLint
+import android.Manifest
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.app.Service
+import android.content.Context
+import android.content.Intent
+import android.os.Binder
+import android.os.Build
+import android.os.IBinder
+import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
+import com.agentkosticka.easierspot.R
+import com.agentkosticka.easierspot.ble.server.BleAdvertiser
+import com.agentkosticka.easierspot.ble.server.GattServer
+import com.agentkosticka.easierspot.data.db.AppDatabase
+import com.agentkosticka.easierspot.data.model.HotspotCredentials
+import com.agentkosticka.easierspot.data.model.RememberedServer
+import com.agentkosticka.easierspot.hotspot.HotspotManager
+import com.agentkosticka.easierspot.ui.server.ServerActivity
+import com.agentkosticka.easierspot.util.LogUtils
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.util.UUID
+
+class BleHotspotService : Service() {
+    companion object {
+        private const val TAG = "BleHotspotService"
+        private const val NOTIFICATION_ID = 1
+        private const val ENABLE_HOTSPOT_NOTIFICATION_ID = 2
+        private const val APPROVAL_NOTIFICATION_ID = 3
+        private const val SERVICE_CHANNEL_ID = "ble_hotspot_service"
+        private const val ALERTS_CHANNEL_ID = "ble_hotspot_alerts"
+        const val ACTION_START_SERVER = "com.agentkosticka.easierspot.START_SERVER"
+        const val ACTION_STOP_SERVER = "com.agentkosticka.easierspot.STOP_SERVER"
+        const val ACTION_APPROVE_CLIENT = "com.agentkosticka.easierspot.APPROVE_CLIENT"
+        const val ACTION_DENY_CLIENT = "com.agentkosticka.easierspot.DENY_CLIENT"
+        const val ACTION_SHOW_APPROVAL = "com.agentkosticka.easierspot.SHOW_APPROVAL"
+        const val EXTRA_DEVICE_ID = "device_id"
+        const val EXTRA_CLIENT_ADDRESS = "client_address"
+        const val EXTRA_CLIENT_DEVICE_ID = "client_device_id"
+        const val EXTRA_CLIENT_NAME = "client_name"
+    }
+
+    private var bleAdvertiser: BleAdvertiser? = null
+    private var gattServer: GattServer? = null
+    private var hotspotManager: HotspotManager? = null
+    private val binder = LocalBinder()
+    private val database by lazy { AppDatabase.getDatabase(this) }
+
+    inner class LocalBinder : Binder() {
+        fun getService(): BleHotspotService = this@BleHotspotService
+    }
+
+    override fun onCreate() {
+        super.onCreate()
+        try {
+            createNotificationChannel()
+            hotspotManager = HotspotManager(this)
+        } catch (e: Exception) {
+            LogUtils.e(TAG, "Error in onCreate", e)
+        }
+    }
+
+    @SuppressLint("ForegroundServiceType")
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        try {
+            val notification = createNotification()
+            startForeground(NOTIFICATION_ID, notification)
+
+            when (intent?.action) {
+                ACTION_START_SERVER -> {
+                    val deviceId = intent.getStringExtra(EXTRA_DEVICE_ID) ?: UUID.randomUUID().toString().take(4)
+                    LogUtils.i(TAG, "Starting BLE server with deviceId: $deviceId")
+                    startBleServer(deviceId)
+                }
+                ACTION_STOP_SERVER -> {
+                    stopBleServer()
+                    stopSelf()
+                }
+                ACTION_APPROVE_CLIENT -> {
+                    val clientAddress = intent.getStringExtra(EXTRA_CLIENT_ADDRESS)
+                    if (clientAddress != null) {
+                        val clientDeviceId = intent.getStringExtra(EXTRA_CLIENT_DEVICE_ID) ?: "Unknown"
+                        val clientName = intent.getStringExtra(EXTRA_CLIENT_NAME) ?: "Unknown Device"
+                        approveClient(clientAddress, clientDeviceId, clientName)
+                    }
+                }
+                ACTION_DENY_CLIENT -> {
+                    val clientAddress = intent.getStringExtra(EXTRA_CLIENT_ADDRESS)
+                    if (clientAddress != null) {
+                        denyClient(clientAddress)
+                    }
+                }
+                ACTION_SHOW_APPROVAL -> {
+                    val clientAddress = intent.getStringExtra(EXTRA_CLIENT_ADDRESS) ?: ""
+                    val deviceId = intent.getStringExtra(EXTRA_CLIENT_DEVICE_ID) ?: "Unknown"
+                    val deviceName = intent.getStringExtra(EXTRA_CLIENT_NAME)
+                    showApprovalNotification(clientAddress, deviceId, deviceName)
+                }
+            }
+        } catch (e: Exception) {
+            LogUtils.e(TAG, "Error in onStartCommand", e)
+        }
+
+        return START_STICKY
+    }
+
+    override fun onBind(intent: Intent?): IBinder {
+        return binder
+    }
+
+    private fun startBleServer(deviceId: String) {
+        try {
+            if (bleAdvertiser == null) {
+                bleAdvertiser = BleAdvertiser(this, deviceId)
+                gattServer = GattServer(this, deviceId)
+                
+                // Set callback for new client connections
+                gattServer?.setNewClientCallback { clientAddress, clientStableId ->
+                    checkAndRequestApproval(clientAddress, clientStableId)
+                }
+            }
+            
+            bleAdvertiser?.startAdvertising()
+            
+            // Check for advertising errors after a short delay
+            android.os.Handler(mainLooper).postDelayed({
+                val error = bleAdvertiser?.advertisingError?.value
+                val isAdvertising = bleAdvertiser?.isAdvertising?.value ?: false
+                if (error != null) {
+                    LogUtils.e(TAG, "Advertising error: $error")
+                } else if (isAdvertising) {
+                    LogUtils.i(TAG, "BLE advertising active")
+                }
+            }, 1000)
+            
+            gattServer?.startServer()
+        } catch (e: Exception) {
+            LogUtils.e(TAG, "Error starting BLE server", e)
+        }
+    }
+
+    private fun stopBleServer() {
+        bleAdvertiser?.stopAdvertising()
+        gattServer?.stopServer()
+        bleAdvertiser = null
+        gattServer = null
+    }
+
+    private fun checkAndRequestApproval(clientAddress: String, clientStableId: String?) {
+        CoroutineScope(Dispatchers.IO).launch {
+            val dao = database.rememberedServerDao()
+            val server = if (!clientStableId.isNullOrBlank()) {
+                dao.getServerById(clientStableId) ?: dao.getServerByAddress(clientAddress)
+            } else {
+                dao.getServerByAddress(clientAddress)
+            }
+            
+            if (server?.isApproved == true) {
+                // Already approved, send credentials immediately
+                LogUtils.i(TAG, "Client $clientAddress already approved (stableId=${server.deviceId})")
+                dao.insertServer(
+                    server.copy(
+                        deviceAddress = clientAddress,
+                        lastSeen = System.currentTimeMillis()
+                    )
+                )
+                activateHotspotAndSendCredentials(clientAddress)
+            } else {
+                LogUtils.i(TAG, "New client $clientAddress requires approval")
+                val displayId = clientStableId ?: "Unknown"
+                dispatchApprovalRequest(clientAddress, displayId, "Client-$displayId")
+            }
+        }
+    }
+
+    private fun dispatchApprovalRequest(clientAddress: String, deviceId: String, deviceName: String?) {
+        val broadcastIntent = Intent(ACTION_SHOW_APPROVAL).apply {
+            `package` = packageName
+            putExtra(EXTRA_CLIENT_ADDRESS, clientAddress)
+            putExtra(EXTRA_CLIENT_DEVICE_ID, deviceId)
+            putExtra(EXTRA_CLIENT_NAME, deviceName ?: "Unknown Device")
+        }
+        sendBroadcast(broadcastIntent)
+        showApprovalNotification(clientAddress, deviceId, deviceName)
+    }
+    
+    private suspend fun activateHotspotAndSendCredentials(clientAddress: String) {
+        val hotspotStarted = hotspotManager?.startHotspot() ?: false
+        
+        if (!hotspotStarted) {
+            // Hotspot couldn't be started programmatically
+            // Check if user has it enabled already
+            val isEnabled = hotspotManager?.isHotspotEnabled() ?: false
+            if (!isEnabled) {
+                LogUtils.w(TAG, "Hotspot not enabled - prompting user")
+                // Send notification to user to enable hotspot
+                showEnableHotspotNotification()
+                // Wait and check periodically
+                var attempts = 0
+                while (attempts < 30) { // Wait up to 30 seconds
+                    delay(1000)
+                    if (hotspotManager?.isHotspotEnabled() == true) {
+                        sendCredentialsToClient(clientAddress)
+                        return
+                    }
+                    attempts++
+                }
+                LogUtils.w(TAG, "Timeout waiting for hotspot enable")
+                withContext(Dispatchers.Main) {
+                    gattServer?.denyClient(clientAddress)
+                }
+                return
+            }
+        }
+        
+        delay(1000)
+        
+        sendCredentialsToClient(clientAddress)
+    }
+    
+    private suspend fun sendCredentialsToClient(clientAddress: String) {
+        val credentials = hotspotManager?.getHotspotCredentials()
+        LogUtils.i(TAG, "Credentials: ssid=${credentials?.ssid ?: "(null)"}")
+        
+        withContext(Dispatchers.Main) {
+            if (credentials != null && credentials.ssid.isNotEmpty()) {
+                gattServer?.approveClient(clientAddress)
+                // Small delay to ensure approval notification is sent first
+                delay(100)
+                gattServer?.sendHotspotCredentials(clientAddress, credentials)
+            } else {
+                LogUtils.w(TAG, "No hotspot credentials available; denying client")
+                gattServer?.denyClient(clientAddress)
+            }
+        }
+    }
+    
+    private fun showEnableHotspotNotification() {
+        if (!canPostNotifications()) {
+            openTetheringSettingsDirectly()
+            return
+        }
+
+        val intent = hotspotManager?.getTetheringSettingsIntent()
+        val pendingIntent = PendingIntent.getActivity(
+            this,
+            0,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        
+        val notification = NotificationCompat.Builder(this, ALERTS_CHANNEL_ID)
+            .setContentTitle("Enable Hotspot")
+            .setContentText("Tap to enable your existing hotspot configuration for sharing")
+            .setSmallIcon(android.R.drawable.ic_dialog_alert)
+            .setContentIntent(pendingIntent)
+            .setAutoCancel(true)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .build()
+        
+        val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        notificationManager.notify(ENABLE_HOTSPOT_NOTIFICATION_ID, notification)
+    }
+
+    private fun approveClient(clientAddress: String, clientDeviceId: String, clientName: String) {
+        CoroutineScope(Dispatchers.IO).launch {
+            database.rememberedServerDao().insertServer(
+                RememberedServer(
+                    deviceId = clientDeviceId,
+                    deviceName = clientName.ifBlank { "Client-$clientDeviceId" },
+                    deviceAddress = clientAddress,
+                    isApproved = true
+                )
+            )
+            activateHotspotAndSendCredentials(clientAddress)
+        }
+    }
+
+    private fun denyClient(clientAddress: String) {
+        gattServer?.denyClient(clientAddress)
+    }
+
+    private fun showApprovalNotification(clientAddress: String, deviceId: String, deviceName: String?) {
+        if (!canPostNotifications()) {
+            return
+        }
+
+        val intent = Intent(this, ServerActivity::class.java).apply {
+            putExtra(EXTRA_CLIENT_ADDRESS, clientAddress)
+            putExtra(EXTRA_CLIENT_DEVICE_ID, deviceId)
+            putExtra(EXTRA_CLIENT_NAME, deviceName ?: "Unknown Device")
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        val pendingIntent = PendingIntent.getActivity(
+            this,
+            1,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val notification = NotificationCompat.Builder(this, ALERTS_CHANNEL_ID)
+            .setContentTitle("New client approval required")
+            .setContentText("Tap to approve hotspot sharing for $deviceId")
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setContentIntent(pendingIntent)
+            .setAutoCancel(true)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .build()
+
+        val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        notificationManager.notify(APPROVAL_NOTIFICATION_ID, notification)
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        stopBleServer()
+    }
+
+    private fun createNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val serviceChannel = NotificationChannel(
+                SERVICE_CHANNEL_ID,
+                "BLE Hotspot Service",
+                NotificationManager.IMPORTANCE_LOW
+            )
+            serviceChannel.description = "Running BLE hotspot sharing"
+
+            val alertsChannel = NotificationChannel(
+                ALERTS_CHANNEL_ID,
+                "Hotspot approvals and prompts",
+                NotificationManager.IMPORTANCE_HIGH
+            )
+            alertsChannel.description = "Approval and hotspot enable prompts"
+
+            val manager = getSystemService(NotificationManager::class.java)
+            manager?.createNotificationChannels(listOf(serviceChannel, alertsChannel))
+        }
+    }
+
+    private fun createNotification(): Notification {
+        val intent = Intent(this, ServerActivity::class.java)
+        val pendingIntent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_IMMUTABLE)
+        } else {
+            PendingIntent.getActivity(this, 0, intent, 0)
+        }
+
+        return NotificationCompat.Builder(this, SERVICE_CHANNEL_ID)
+            .setContentTitle("EasierSpot")
+            .setContentText("Hotspot sharing active")
+            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setContentIntent(pendingIntent)
+            .setOngoing(true)
+            .build()
+    }
+
+    private fun canPostNotifications(): Boolean {
+        val hasRuntimePermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) ==
+                android.content.pm.PackageManager.PERMISSION_GRANTED
+        } else {
+            true
+        }
+        return hasRuntimePermission && NotificationManagerCompat.from(this).areNotificationsEnabled()
+    }
+
+    private fun openTetheringSettingsDirectly() {
+        val intent = hotspotManager?.getTetheringSettingsIntent() ?: return
+        try {
+            startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        } catch (e: Exception) {
+            LogUtils.w(TAG, "Unable to open tethering settings: ${e.message}")
+        }
+    }
+}

@@ -1,0 +1,367 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<issues format="6" by="lint 9.1.0" type="baseline" client="gradle" dependencies="false" name="AGP (9.1.0)" variant="all" version="9.1.0">
+
+    <issue
+        id="InlinedApi"
+        message="Field requires API level 31 (current min is 24): `android.Manifest.permission#BLUETOOTH_ADVERTISE`"
+        errorLine1="            Manifest.permission.BLUETOOTH_ADVERTISE"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/agentkosticka/easierspot/ble/server/BleAdvertiser.kt"
+            line="110"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="InlinedApi"
+        message="Field requires API level 31 (current min is 24): `android.Manifest.permission#BLUETOOTH_SCAN`"
+        errorLine1="            Manifest.permission.BLUETOOTH_SCAN"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/agentkosticka/easierspot/ble/client/BleScanner.kt"
+            line="116"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="InlinedApi"
+        message="Field requires API level 31 (current min is 24): `android.Manifest.permission#BLUETOOTH_CONNECT`"
+        errorLine1="            Manifest.permission.BLUETOOTH_CONNECT"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/agentkosticka/easierspot/ble/client/GattClient.kt"
+            line="78"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="InlinedApi"
+        message="Field requires API level 31 (current min is 24): `android.Manifest.permission#BLUETOOTH_SCAN`"
+        errorLine1="                    Manifest.permission.BLUETOOTH_SCAN"
+        errorLine2="                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/agentkosticka/easierspot/ble/client/GattClient.kt"
+            line="82"
+            column="21"/>
+    </issue>
+
+    <issue
+        id="InlinedApi"
+        message="Field requires API level 31 (current min is 24): `android.Manifest.permission#BLUETOOTH_CONNECT`"
+        errorLine1="            Manifest.permission.BLUETOOTH_CONNECT"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/agentkosticka/easierspot/ble/server/GattServer.kt"
+            line="158"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="InlinedApi"
+        message="Field requires API level 31 (current min is 24): `android.Manifest.permission#BLUETOOTH_SCAN`"
+        errorLine1="            Manifest.permission.BLUETOOTH_SCAN,"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/agentkosticka/easierspot/ui/MainActivity.kt"
+            line="40"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="InlinedApi"
+        message="Field requires API level 31 (current min is 24): `android.Manifest.permission#BLUETOOTH_CONNECT`"
+        errorLine1="            Manifest.permission.BLUETOOTH_CONNECT,"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/agentkosticka/easierspot/ui/MainActivity.kt"
+            line="41"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="InlinedApi"
+        message="Field requires API level 31 (current min is 24): `android.Manifest.permission#BLUETOOTH_ADVERTISE`"
+        errorLine1="            Manifest.permission.BLUETOOTH_ADVERTISE,"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/agentkosticka/easierspot/ui/MainActivity.kt"
+            line="42"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="InlinedApi"
+        message="Field requires API level 28 (current min is 24): `android.Manifest.permission#FOREGROUND_SERVICE`"
+        errorLine1="        permissions.add(Manifest.permission.FOREGROUND_SERVICE)"
+        errorLine2="                        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/agentkosticka/easierspot/ui/MainActivity.kt"
+            line="52"
+            column="25"/>
+    </issue>
+
+    <issue
+        id="NewApi"
+        message="Call requires API level 26 (current min is 24): `android.content.ContextWrapper#startForegroundService`"
+        errorLine1="        startForegroundService(serviceIntent)"
+        errorLine2="        ~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/agentkosticka/easierspot/ui/server/ServerActivity.kt"
+            line="51"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="CoarseFineLocation"
+        message="If you need access to FINE location, you must request both `ACCESS_FINE_LOCATION` and `ACCESS_COARSE_LOCATION`"
+        errorLine1="    &lt;uses-permission android:name=&quot;android.permission.ACCESS_FINE_LOCATION&quot; />"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/AndroidManifest.xml"
+            line="9"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="ForegroundServicePermission"
+        message="foregroundServiceType:connectedDevice requires permission:[android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE]"
+        errorLine1="        &lt;service"
+        errorLine2="        ^">
+        <location
+            file="src/main/AndroidManifest.xml"
+            line="46"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.appcompat:appcompat than 1.6.1 is available: 1.7.1"
+        errorLine1="appcompat = &quot;1.6.1&quot;"
+        errorLine2="            ~~~~~~~">
+        <location
+            file="$HOME/AndroidStudioProjects/EasierSpot/gradle/libs.versions.toml"
+            line="7"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of com.google.android.material:material than 1.10.0 is available: 1.13.0"
+        errorLine1="material = &quot;1.10.0&quot;"
+        errorLine2="           ~~~~~~~~">
+        <location
+            file="$HOME/AndroidStudioProjects/EasierSpot/gradle/libs.versions.toml"
+            line="8"
+            column="12"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.constraintlayout:constraintlayout than 2.1.4 is available: 2.2.1"
+        errorLine1="constraintlayout = &quot;2.1.4&quot;"
+        errorLine2="                   ~~~~~~~">
+        <location
+            file="$HOME/AndroidStudioProjects/EasierSpot/gradle/libs.versions.toml"
+            line="10"
+            column="20"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.room:room-compiler than 2.6.1 is available: 2.8.4"
+        errorLine1="room = &quot;2.6.1&quot;"
+        errorLine2="       ~~~~~~~">
+        <location
+            file="$HOME/AndroidStudioProjects/EasierSpot/gradle/libs.versions.toml"
+            line="12"
+            column="8"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.room:room-ktx than 2.6.1 is available: 2.8.4"
+        errorLine1="room = &quot;2.6.1&quot;"
+        errorLine2="       ~~~~~~~">
+        <location
+            file="$HOME/AndroidStudioProjects/EasierSpot/gradle/libs.versions.toml"
+            line="12"
+            column="8"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.room:room-runtime than 2.6.1 is available: 2.8.4"
+        errorLine1="room = &quot;2.6.1&quot;"
+        errorLine2="       ~~~~~~~">
+        <location
+            file="$HOME/AndroidStudioProjects/EasierSpot/gradle/libs.versions.toml"
+            line="12"
+            column="8"/>
+    </issue>
+
+    <issue
+        id="NewerVersionAvailable"
+        message="A newer version of com.google.dagger.hilt.android than 2.51 is available: 2.59.2"
+        errorLine1="hilt = &quot;2.51&quot;"
+        errorLine2="       ~~~~~~">
+        <location
+            file="$HOME/AndroidStudioProjects/EasierSpot/gradle/libs.versions.toml"
+            line="13"
+            column="8"/>
+    </issue>
+
+    <issue
+        id="NewerVersionAvailable"
+        message="A newer version of com.google.dagger:hilt-android than 2.51 is available: 2.59.2"
+        errorLine1="hilt = &quot;2.51&quot;"
+        errorLine2="       ~~~~~~">
+        <location
+            file="$HOME/AndroidStudioProjects/EasierSpot/gradle/libs.versions.toml"
+            line="13"
+            column="8"/>
+    </issue>
+
+    <issue
+        id="NewerVersionAvailable"
+        message="A newer version of com.google.dagger:hilt-compiler than 2.51 is available: 2.59.2"
+        errorLine1="hilt = &quot;2.51&quot;"
+        errorLine2="       ~~~~~~">
+        <location
+            file="$HOME/AndroidStudioProjects/EasierSpot/gradle/libs.versions.toml"
+            line="13"
+            column="8"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.color.black` appears to be unused"
+        errorLine1="    &lt;color name=&quot;black&quot;>#FF000000&lt;/color>"
+        errorLine2="           ~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/colors.xml"
+            line="3"
+            column="12"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.color.white` appears to be unused"
+        errorLine1="    &lt;color name=&quot;white&quot;>#FFFFFFFF&lt;/color>"
+        errorLine2="           ~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/colors.xml"
+            line="4"
+            column="12"/>
+    </issue>
+
+    <issue
+        id="SetTextI18n"
+        message="String literal in `setText` can not be translated. Use Android resources instead."
+        errorLine1="                    scanButton.text = &quot;Stop Scan&quot;"
+        errorLine2="                                       ~~~~~~~~~">
+        <location
+            file="src/main/java/com/agentkosticka/easierspot/ui/client/ClientActivity.kt"
+            line="54"
+            column="40"/>
+    </issue>
+
+    <issue
+        id="SetTextI18n"
+        message="String literal in `setText` can not be translated. Use Android resources instead."
+        errorLine1="                    scanButton.text = &quot;Start Scan&quot;"
+        errorLine2="                                       ~~~~~~~~~~">
+        <location
+            file="src/main/java/com/agentkosticka/easierspot/ui/client/ClientActivity.kt"
+            line="57"
+            column="40"/>
+    </issue>
+
+    <issue
+        id="HardcodedText"
+        message="Hardcoded string &quot;Start Scan&quot;, should use `@string` resource"
+        errorLine1="        android:text=&quot;Start Scan&quot;"
+        errorLine2="        ~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/layout/activity_client.xml"
+            line="12"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="HardcodedText"
+        message="Hardcoded string &quot;EasierSpot&quot;, should use `@string` resource"
+        errorLine1="        android:text=&quot;EasierSpot&quot;"
+        errorLine2="        ~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/layout/activity_main.xml"
+            line="12"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="HardcodedText"
+        message="Hardcoded string &quot;Select Mode&quot;, should use `@string` resource"
+        errorLine1="        android:text=&quot;Select Mode&quot;"
+        errorLine2="        ~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/layout/activity_main.xml"
+            line="21"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="HardcodedText"
+        message="Hardcoded string &quot;Connect to Hotspot (Client)&quot;, should use `@string` resource"
+        errorLine1="        android:text=&quot;Connect to Hotspot (Client)&quot;"
+        errorLine2="        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/layout/activity_main.xml"
+            line="30"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="HardcodedText"
+        message="Hardcoded string &quot;Share Hotspot (Server)&quot;, should use `@string` resource"
+        errorLine1="        android:text=&quot;Share Hotspot (Server)&quot;"
+        errorLine2="        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/layout/activity_main.xml"
+            line="38"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="HardcodedText"
+        message="Hardcoded string &quot;Share Your Hotspot&quot;, should use `@string` resource"
+        errorLine1="        android:text=&quot;Share Your Hotspot&quot;"
+        errorLine2="        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/layout/activity_server.xml"
+            line="12"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="HardcodedText"
+        message="Hardcoded string &quot;Start Sharing&quot;, should use `@string` resource"
+        errorLine1="        android:text=&quot;Start Sharing&quot;"
+        errorLine2="        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/layout/activity_server.xml"
+            line="22"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="HardcodedText"
+        message="Hardcoded string &quot;Stop Sharing&quot;, should use `@string` resource"
+        errorLine1="        android:text=&quot;Stop Sharing&quot;"
+        errorLine2="        ~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/layout/activity_server.xml"
+            line="31"
+            column="9"/>
+    </issue>
+
+</issues>

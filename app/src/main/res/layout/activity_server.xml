@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="16dp">
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Share Your Hotspot"
+        android:textSize="24sp"
+        android:textStyle="bold"
+        android:gravity="center"
+        android:layout_marginBottom="32dp" />
+
+    <Button
+        android:id="@+id/btn_start_sharing"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Start Sharing"
+        android:layout_marginBottom="16dp"
+        android:padding="16dp"
+        android:textSize="16sp" />
+
+    <Button
+        android:id="@+id/btn_stop_sharing"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Stop Sharing"
+        android:padding="16dp"
+        android:textSize="16sp" />
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="#CCCCCC"
+        android:layout_marginTop="32dp"
+        android:layout_marginBottom="16dp" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Diagnostics"
+        android:textSize="18sp"
+        android:textStyle="bold"
+        android:gravity="center"
+        android:layout_marginBottom="16dp" />
+
+    <Button
+        android:id="@+id/btn_test_hotspot"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Test Hotspot Config"
+        android:layout_marginBottom="16dp"
+        android:padding="16dp"
+        android:textSize="16sp" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Remembered Devices"
+        android:textSize="18sp"
+        android:textStyle="bold"
+        android:layout_marginBottom="8dp" />
+
+    <ListView
+        android:id="@+id/list_remembered_devices"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1" />
+
+</LinearLayout>
