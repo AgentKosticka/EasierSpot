@@ -172,10 +172,11 @@ class ClientActivity : AppCompatActivity() {
             gattClient.receivedCredentials.collect { credentials ->
                 if (credentials != null) {
                     Log.d(TAG, "Received credentials: ${credentials.ssid}")
-                    statusText.text = "Got credentials! Connecting to ${credentials.ssid}..."
+                    statusText.text = "Got credentials! Preparing fast Wi-Fi handoff..."
                     isConnecting = false
-                    connectToHotspot(credentials)
                     gattClient.disconnect()
+                    delay(300)
+                    connectToHotspot(credentials)
                 }
             }
         }
@@ -297,6 +298,8 @@ class ClientActivity : AppCompatActivity() {
             return
         }
 
+        prepareFastWifiHandoff(credentials)
+
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
             Toast.makeText(
                 this,
@@ -384,6 +387,8 @@ class ClientActivity : AppCompatActivity() {
     private fun connectToHotspotViaAddNetworks(credentials: HotspotCredentials): Boolean {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return false
 
+        prepareWifiHandoffForAddNetworks(credentials)
+
         val suggestion = buildNetworkSuggestion(credentials)
         val intent = Intent(Settings.ACTION_WIFI_ADD_NETWORKS).apply {
             putParcelableArrayListExtra(
@@ -397,6 +402,40 @@ class ClientActivity : AppCompatActivity() {
         statusText.visibility = android.view.View.VISIBLE
         startActivityForResult(intent, REQUEST_ADD_WIFI_NETWORKS)
         return true
+    }
+
+    private fun prepareWifiHandoffForAddNetworks(credentials: HotspotCredentials) {
+        val wifiManager = applicationContext.getSystemService(WIFI_SERVICE) as WifiManager
+        @Suppress("DEPRECATION")
+        val currentSsid = normalizeSsid(wifiManager.connectionInfo?.ssid)
+        if (currentSsid.isBlank() || currentSsid == credentials.ssid) {
+            return
+        }
+
+        @Suppress("DEPRECATION")
+        val disconnected = runCatching { wifiManager.disconnect() }.getOrDefault(false)
+        if (disconnected) {
+            Log.d(TAG, "Disconnected from $currentSsid before add-network handoff to ${credentials.ssid}")
+        } else {
+            Log.d(TAG, "Could not disconnect from $currentSsid before add-network handoff")
+        }
+    }
+
+    private fun prepareFastWifiHandoff(credentials: HotspotCredentials) {
+        val wifiManager = applicationContext.getSystemService(WIFI_SERVICE) as WifiManager
+        val suggestion = buildNetworkSuggestion(credentials)
+
+        runCatching {
+            wifiManager.removeNetworkSuggestions(listOf(suggestion))
+        }.onFailure {
+            Log.d(TAG, "Could not clear previous suggestion for ${credentials.ssid}: ${it.message}")
+        }
+
+        @Suppress("DEPRECATION")
+        val disconnected = runCatching { wifiManager.disconnect() }.getOrDefault(false)
+        if (disconnected) {
+            Log.d(TAG, "Pre-join Wi-Fi disconnect requested for fast handoff to ${credentials.ssid}")
+        }
     }
 
     private fun buildNetworkSuggestion(credentials: HotspotCredentials): WifiNetworkSuggestion {
