@@ -52,7 +52,6 @@ class ClientActivity : AppCompatActivity() {
     private var hotspotNetworkCallback: ConnectivityManager.NetworkCallback? = null
     private var suggestionNetworkCallback: ConnectivityManager.NetworkCallback? = null
     private var suggestionFallbackJob: Job? = null
-    private var addNetworksFallbackJob: Job? = null
     private var suggestionPostConnectReceiver: BroadcastReceiver? = null
     private var isConnecting = false
     private var pendingCredentials: HotspotCredentials? = null
@@ -250,11 +249,6 @@ class ClientActivity : AppCompatActivity() {
             }
 
             if (resultCode != RESULT_OK) {
-                if (pendingSuggestionCredentials == credentials) {
-                    statusText.text = "Add-network cancelled. Continuing suggestion path..."
-                    statusText.visibility = android.view.View.VISIBLE
-                    return
-                }
                 statusText.text = "Wi-Fi add/connect cancelled. You can retry or use temporary mode."
                 statusText.visibility = android.view.View.VISIBLE
                 showTemporaryConnectionFallbackDialog(credentials)
@@ -265,14 +259,12 @@ class ClientActivity : AppCompatActivity() {
             val resultList = data?.getIntArrayExtra(Settings.EXTRA_WIFI_NETWORK_RESULT_LIST)
             val allSucceeded = resultList?.all { it == ADD_WIFI_RESULT_SUCCESS } ?: true
             if (!allSucceeded) {
-                if (pendingSuggestionCredentials == credentials) {
-                    statusText.text = "Add-network failed. Waiting on suggestion path..."
-                    statusText.visibility = android.view.View.VISIBLE
-                    return
-                }
                 statusText.text = "System could not add/connect this network reliably."
                 statusText.visibility = android.view.View.VISIBLE
-                showTemporaryConnectionFallbackDialog(credentials)
+                val suggestionStarted = connectToHotspotViaSuggestion(credentials)
+                if (!suggestionStarted) {
+                    showTemporaryConnectionFallbackDialog(credentials)
+                }
                 return
             }
 
@@ -321,20 +313,18 @@ class ClientActivity : AppCompatActivity() {
         }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val addNetworksStarted = connectToHotspotViaAddNetworks(credentials)
+            if (addNetworksStarted) {
+                return
+            }
+
             val suggestionStarted = connectToHotspotViaSuggestion(credentials)
             if (suggestionStarted) {
-                scheduleAddNetworksFallback(credentials)
-                statusText.text = "Trying system suggestion first for ${credentials.ssid}..."
+                statusText.text = "Add-network unavailable. Using suggestion for ${credentials.ssid}..."
                 statusText.visibility = android.view.View.VISIBLE
                 return
             }
 
-            val addNetworksStarted = connectToHotspotViaAddNetworks(credentials)
-            if (addNetworksStarted) {
-                statusText.text = "Suggestion failed, trying add-network path for ${credentials.ssid}..."
-                statusText.visibility = android.view.View.VISIBLE
-                return
-            }
             showTemporaryConnectionFallbackDialog(credentials)
             return
         }
@@ -391,25 +381,6 @@ class ClientActivity : AppCompatActivity() {
         return true
     }
 
-    private fun scheduleAddNetworksFallback(credentials: HotspotCredentials) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
-
-        addNetworksFallbackJob?.cancel()
-        addNetworksFallbackJob = lifecycleScope.launch {
-            delay(6000)
-            if (pendingSuggestionCredentials != credentials || pendingAddNetworksCredentials != null) {
-                return@launch
-            }
-            runOnUiThread {
-                val started = connectToHotspotViaAddNetworks(credentials)
-                if (started) {
-                    statusText.text = "Suggestion still pending. Trying add-network path..."
-                    statusText.visibility = android.view.View.VISIBLE
-                }
-            }
-        }
-    }
-
     private fun connectToHotspotViaAddNetworks(credentials: HotspotCredentials): Boolean {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return false
 
@@ -457,7 +428,6 @@ class ClientActivity : AppCompatActivity() {
 
                 pendingSuggestionCredentials = null
                 suggestionFallbackJob?.cancel()
-                addNetworksFallbackJob?.cancel()
 
                 runOnUiThread {
                     if (validated) {
@@ -593,7 +563,6 @@ class ClientActivity : AppCompatActivity() {
         super.onDestroy()
         Log.d(TAG, "onDestroy()")
         suggestionFallbackJob?.cancel()
-        addNetworksFallbackJob?.cancel()
         suggestionPostConnectReceiver?.let {
             runCatching { unregisterReceiver(it) }
         }
