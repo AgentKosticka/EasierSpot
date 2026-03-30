@@ -60,7 +60,6 @@ class ServerActivity : AppCompatActivity(), ApprovalDialog.ApprovalListener, Rem
             val startButton = findViewById<Button>(R.id.btn_start_sharing)
             val stopButton = findViewById<Button>(R.id.btn_stop_sharing)
             val settingsButton = findViewById<ImageButton>(R.id.btn_server_settings)
-            val diagnosticsButton = findViewById<ImageButton>(R.id.btn_server_diagnostics)
             val rememberedList = findViewById<ListView>(R.id.list_remembered_devices)
 
             rememberedAdapter = SimpleAdapter(
@@ -109,10 +108,6 @@ class ServerActivity : AppCompatActivity(), ApprovalDialog.ApprovalListener, Rem
 
             settingsButton.setOnClickListener {
                 startActivity(Intent(this, SettingsActivity::class.java))
-            }
-
-            diagnosticsButton.setOnClickListener {
-                startActivity(Intent(this, DiagnosticsActivity::class.java))
             }
 
             stopButton.isEnabled = false
@@ -190,14 +185,33 @@ class ServerActivity : AppCompatActivity(), ApprovalDialog.ApprovalListener, Rem
 
     private fun showPendingApprovalIfPresent(sourceIntent: Intent?) {
         val clientAddress = sourceIntent?.getStringExtra(BleHotspotService.EXTRA_CLIENT_ADDRESS) ?: return
-        val clientDeviceId = sourceIntent.getStringExtra(BleHotspotService.EXTRA_CLIENT_DEVICE_ID) ?: "Unknown"
-        val clientName = sourceIntent.getStringExtra(BleHotspotService.EXTRA_CLIENT_NAME) ?: "Unknown Device"
+        val rawClientDeviceId = sourceIntent.getStringExtra(BleHotspotService.EXTRA_CLIENT_DEVICE_ID)
+        val rawClientName = sourceIntent.getStringExtra(BleHotspotService.EXTRA_CLIENT_NAME)
+        val nickname = sourceIntent.getStringExtra(BleHotspotService.EXTRA_APPROVAL_NICKNAME)
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
+        val displayId = sourceIntent.getStringExtra(BleHotspotService.EXTRA_APPROVAL_DISPLAY_ID)
+            ?: BleHotspotService.normalizeIdentityForDisplay(rawClientDeviceId)
+        val displayName = sourceIntent.getStringExtra(BleHotspotService.EXTRA_APPROVAL_DISPLAY_NAME)
+            ?: BleHotspotService.normalizeIdentityForDisplay(rawClientName)
+                .takeUnless { it == "Unknown" }
+            ?: displayId
+        val isRememberedClient = sourceIntent.getBooleanExtra(
+            BleHotspotService.EXTRA_APPROVAL_IS_REMEMBERED,
+            false
+        )
 
         if (supportFragmentManager.findFragmentByTag(APPROVAL_DIALOG_TAG) != null) {
             return
         }
 
-        ApprovalDialog.newInstance(clientDeviceId, clientName, clientAddress)
+        ApprovalDialog.newInstance(
+            deviceId = rawClientDeviceId ?: displayId,
+            deviceName = rawClientName ?: displayName,
+            deviceAddress = clientAddress,
+            isNewDevice = !isRememberedClient,
+            nickname = nickname
+        )
             .show(supportFragmentManager, APPROVAL_DIALOG_TAG)
     }
 
@@ -289,7 +303,7 @@ class ServerActivity : AppCompatActivity(), ApprovalDialog.ApprovalListener, Rem
             .getBoolean(KEY_RUNNING, false)
     }
 
-    override fun onApprove(deviceId: String, deviceAddress: String) {
+    override fun onApprove(deviceId: String, deviceName: String?, deviceAddress: String) {
         Toast.makeText(this, "Approved device: $deviceId", Toast.LENGTH_SHORT).show()
 
         // Notify service to send credentials
@@ -297,7 +311,10 @@ class ServerActivity : AppCompatActivity(), ApprovalDialog.ApprovalListener, Rem
             action = BleHotspotService.ACTION_APPROVE_CLIENT
             putExtra(BleHotspotService.EXTRA_CLIENT_ADDRESS, deviceAddress)
             putExtra(BleHotspotService.EXTRA_CLIENT_DEVICE_ID, deviceId)
-            putExtra(BleHotspotService.EXTRA_CLIENT_NAME, "Client-$deviceId")
+            putExtra(
+                BleHotspotService.EXTRA_CLIENT_NAME,
+                deviceName?.takeIf { it.isNotBlank() } ?: "Unknown Device"
+            )
         }
         startService(approveIntent)
     }

@@ -80,6 +80,12 @@ class BleHotspotServicePolicyBehaviorTest {
         assertEquals(BleHotspotService.ApprovalDecision.REQUEST_APPROVAL, decision)
     }
 
+    @Test
+    fun `normalize identity strips client prefix repeatedly`() {
+        assertEquals("abc123", BleHotspotService.normalizeIdentityForDisplay("client-client_abc123"))
+        assertEquals("xy", BleHotspotService.normalizeIdentityForDisplay(" Client-xy "))
+    }
+
     private fun rememberedServer(
         deviceId: String = "dev-1",
         deviceName: String = "Device Name",

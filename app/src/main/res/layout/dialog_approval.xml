@@ -6,26 +6,27 @@
     android:padding="24dp">
 
     <TextView
+        android:id="@+id/tv_approval_title"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="New Device Wants to Connect"
+        android:text="@string/approval_title_new_device"
         android:textSize="20sp"
         android:textStyle="bold"
         android:layout_marginBottom="16dp" />
 
     <TextView
-        android:id="@+id/tv_device_id"
+        android:id="@+id/tv_primary_identity"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="Device ID: Unknown"
+        android:text="@string/approval_identity_unknown"
         android:textSize="16sp"
         android:layout_marginBottom="8dp" />
 
     <TextView
-        android:id="@+id/tv_device_name"
+        android:id="@+id/tv_secondary_identity"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="Device Name: Unknown"
+        android:text="@string/approval_identity_unknown"
         android:textSize="14sp"
         android:layout_marginBottom="24dp" />
 
@@ -39,7 +40,7 @@
             android:id="@+id/btn_deny"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Deny"
+            android:text="@string/approval_action_deny"
             android:layout_marginEnd="8dp"
             style="@style/Widget.AppCompat.Button.Borderless" />
 
@@ -47,7 +48,7 @@
             android:id="@+id/btn_approve"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Approve" />
+            android:text="@string/approval_action_approve" />
 
     </LinearLayout>
 

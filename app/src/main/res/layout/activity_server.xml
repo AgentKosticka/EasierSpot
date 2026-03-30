@@ -29,13 +29,6 @@
                 android:src="@android:drawable/ic_menu_manage"
                 android:layout_marginEnd="4dp" />
 
-            <ImageButton
-                android:id="@+id/btn_server_diagnostics"
-                android:layout_width="36dp"
-                android:layout_height="36dp"
-                android:background="?attr/selectableItemBackgroundBorderless"
-                android:contentDescription="@string/action_diagnostics"
-                android:src="@android:drawable/ic_menu_info_details" />
         </LinearLayout>
 
         <TextView

@@ -58,11 +58,32 @@ class BleHotspotService : Service() {
         const val EXTRA_CLIENT_ADDRESS = "client_address"
         const val EXTRA_CLIENT_DEVICE_ID = "client_device_id"
         const val EXTRA_CLIENT_NAME = "client_name"
+        const val EXTRA_APPROVAL_IS_REMEMBERED = "approval_is_remembered"
+        const val EXTRA_APPROVAL_DISPLAY_ID = "approval_display_id"
+        const val EXTRA_APPROVAL_DISPLAY_NAME = "approval_display_name"
+        const val EXTRA_APPROVAL_NICKNAME = "approval_nickname"
         @Volatile
         var isServerRunning: Boolean = false
             private set
         private const val STATE_PREFS = "server_service_state"
         private const val KEY_RUNNING = "running"
+        private val CLIENT_PREFIX_REGEX = Regex("(?i)^client[-_\\s]*")
+
+        internal fun normalizeIdentityForDisplay(rawIdentity: String?): String {
+            val trimmed = rawIdentity?.trim().orEmpty()
+            if (trimmed.isEmpty()) return "Unknown"
+
+            var normalized = trimmed
+            while (true) {
+                val next = CLIENT_PREFIX_REGEX.replace(normalized, "")
+                    .trimStart('-', '_', ' ')
+                    .trim()
+                if (next == normalized) break
+                normalized = next
+            }
+
+            return normalized.ifBlank { trimmed }
+        }
     }
 
     private var bleAdvertiser: BleAdvertiser? = null
@@ -139,7 +160,19 @@ class BleHotspotService : Service() {
                     val clientAddress = intent.getStringExtra(EXTRA_CLIENT_ADDRESS) ?: ""
                     val deviceId = intent.getStringExtra(EXTRA_CLIENT_DEVICE_ID) ?: "Unknown"
                     val deviceName = intent.getStringExtra(EXTRA_CLIENT_NAME)
-                    showApprovalNotification(clientAddress, deviceId, deviceName)
+                    val isRememberedClient = intent.getBooleanExtra(EXTRA_APPROVAL_IS_REMEMBERED, false)
+                    val displayId = intent.getStringExtra(EXTRA_APPROVAL_DISPLAY_ID)
+                    val displayName = intent.getStringExtra(EXTRA_APPROVAL_DISPLAY_NAME)
+                    val nickname = intent.getStringExtra(EXTRA_APPROVAL_NICKNAME)
+                    showApprovalNotification(
+                        clientAddress = clientAddress,
+                        deviceId = deviceId,
+                        deviceName = deviceName,
+                        isRememberedClient = isRememberedClient,
+                        displayId = displayId,
+                        displayName = displayName,
+                        nickname = nickname
+                    )
                 }
             }
         } catch (e: Exception) {
@@ -215,11 +248,23 @@ class BleHotspotService : Service() {
                 ApprovalDecision.REQUEST_APPROVAL -> {
                     if (rememberedClient == null) {
                         LogUtils.i(TAG, "New client $clientAddress requires approval")
-                        val displayId = clientStableId ?: "Unknown"
-                        dispatchApprovalRequest(clientAddress, displayId, "Client-$displayId")
+                        val stableId = clientStableId ?: "Unknown"
+                        dispatchApprovalRequest(
+                            clientAddress = clientAddress,
+                            deviceId = stableId,
+                            deviceName = stableId,
+                            isRememberedClient = false,
+                            nickname = null
+                        )
                     } else {
                         LogUtils.i(TAG, "Client $clientAddress requires approval")
-                        dispatchApprovalRequest(clientAddress, rememberedClient.deviceId, rememberedClient.deviceName)
+                        dispatchApprovalRequest(
+                            clientAddress = clientAddress,
+                            deviceId = rememberedClient.deviceId,
+                            deviceName = rememberedClient.deviceName,
+                            isRememberedClient = true,
+                            nickname = rememberedClient.nickname
+                        )
                     }
                 }
                 ApprovalDecision.AUTO_DENY -> {
@@ -272,15 +317,38 @@ class BleHotspotService : Service() {
         )
     }
 
-    private fun dispatchApprovalRequest(clientAddress: String, deviceId: String, deviceName: String?) {
+    private fun dispatchApprovalRequest(
+        clientAddress: String,
+        deviceId: String,
+        deviceName: String?,
+        isRememberedClient: Boolean,
+        nickname: String?
+    ) {
+        val normalizedDisplayId = normalizeIdentityForDisplay(deviceId)
+        val normalizedDisplayName = normalizeIdentityForDisplay(deviceName)
+            .takeUnless { it == "Unknown" }
+            ?: normalizedDisplayId
+
         val broadcastIntent = Intent(ACTION_SHOW_APPROVAL).apply {
             `package` = packageName
             putExtra(EXTRA_CLIENT_ADDRESS, clientAddress)
             putExtra(EXTRA_CLIENT_DEVICE_ID, deviceId)
             putExtra(EXTRA_CLIENT_NAME, deviceName ?: "Unknown Device")
+            putExtra(EXTRA_APPROVAL_IS_REMEMBERED, isRememberedClient)
+            putExtra(EXTRA_APPROVAL_DISPLAY_ID, normalizedDisplayId)
+            putExtra(EXTRA_APPROVAL_DISPLAY_NAME, normalizedDisplayName)
+            putExtra(EXTRA_APPROVAL_NICKNAME, nickname)
         }
         sendBroadcast(broadcastIntent)
-        showApprovalNotification(clientAddress, deviceId, deviceName)
+        showApprovalNotification(
+            clientAddress = clientAddress,
+            deviceId = deviceId,
+            deviceName = deviceName,
+            isRememberedClient = isRememberedClient,
+            displayId = normalizedDisplayId,
+            displayName = normalizedDisplayName,
+            nickname = nickname
+        )
     }
     
     private suspend fun activateHotspotAndSendCredentials(clientAddress: String, clientDeviceId: String? = null) {
@@ -412,15 +480,32 @@ class BleHotspotService : Service() {
         gattServer?.denyClient(clientAddress)
     }
 
-    private fun showApprovalNotification(clientAddress: String, deviceId: String, deviceName: String?) {
+    private fun showApprovalNotification(
+        clientAddress: String,
+        deviceId: String,
+        deviceName: String?,
+        isRememberedClient: Boolean = false,
+        displayId: String? = null,
+        displayName: String? = null,
+        nickname: String? = null
+    ) {
         if (!canPostNotifications()) {
             return
         }
 
+        val normalizedDisplayId = displayId ?: normalizeIdentityForDisplay(deviceId)
+        val normalizedDisplayName = displayName ?: normalizeIdentityForDisplay(deviceName)
+            .takeUnless { it == "Unknown" }
+            ?: normalizedDisplayId
+
         val intent = Intent(this, ServerActivity::class.java).apply {
             putExtra(EXTRA_CLIENT_ADDRESS, clientAddress)
             putExtra(EXTRA_CLIENT_DEVICE_ID, deviceId)
-            putExtra(EXTRA_CLIENT_NAME, deviceName ?: "Unknown Device")
+            putExtra(EXTRA_CLIENT_NAME, normalizedDisplayName)
+            putExtra(EXTRA_APPROVAL_IS_REMEMBERED, isRememberedClient)
+            putExtra(EXTRA_APPROVAL_DISPLAY_ID, normalizedDisplayId)
+            putExtra(EXTRA_APPROVAL_DISPLAY_NAME, normalizedDisplayName)
+            putExtra(EXTRA_APPROVAL_NICKNAME, nickname)
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
         }
         val pendingIntent = PendingIntent.getActivity(
@@ -432,7 +517,7 @@ class BleHotspotService : Service() {
 
         val notification = NotificationCompat.Builder(this, ALERTS_CHANNEL_ID)
             .setContentTitle("New client approval required")
-            .setContentText("Tap to approve hotspot sharing for $deviceId")
+            .setContentText("Tap to approve hotspot sharing for $normalizedDisplayId")
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setContentIntent(pendingIntent)
             .setAutoCancel(true)
