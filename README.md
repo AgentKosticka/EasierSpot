@@ -128,7 +128,7 @@ app/src/main/java/com/agentkosticka/EasierSpot/
 
 ## License
 
-You can view it in `LICENSE.md`
+We use the **GNU General Public License v3.0**. Read more [here](LICENSE)
 
 ## Contributing
 
