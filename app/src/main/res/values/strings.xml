@@ -40,7 +40,7 @@
     <string name="approval_title_new_device">New device wants to connect</string>
     <string name="approval_title_existing_device">Device %1$s wants to join</string>
     <string name="approval_identity_unknown">Unknown</string>
-    <string name="approval_identity_id_only">%1$s</string>
+    <string name="approval_identity_id_only">ID: %1$s</string>
     <string name="approval_identity_id_line">ID: %1$s</string>
     <string name="approval_action_deny">Deny</string>
     <string name="approval_action_approve">Approve</string>
