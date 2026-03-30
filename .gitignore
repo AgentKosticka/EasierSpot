@@ -1,5 +1,10 @@
 *.iml
 .gradle
+/.idea/
+/.git-backup/
+/.kotlin/
+/.github/
+/system-api-stubs/
 /local.properties
 /.idea/caches
 /.idea/libraries
