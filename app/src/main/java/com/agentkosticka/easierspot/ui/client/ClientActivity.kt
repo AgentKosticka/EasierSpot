@@ -34,8 +34,10 @@ import com.agentkosticka.easierspot.ble.client.GattClient
 import com.agentkosticka.easierspot.data.model.HotspotCredentials
 import com.agentkosticka.easierspot.ui.settings.SettingsActivity
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeout
 
 class ClientActivity : AppCompatActivity() {
     companion object {
@@ -53,11 +55,17 @@ class ClientActivity : AppCompatActivity() {
     private var hotspotNetworkCallback: ConnectivityManager.NetworkCallback? = null
     private var suggestionNetworkCallback: ConnectivityManager.NetworkCallback? = null
     private var suggestionFallbackJob: Job? = null
+    private var addNetworkStabilityJob: Job? = null
     private var suggestionPostConnectReceiver: BroadcastReceiver? = null
     private var isConnecting = false
     private var pendingCredentials: HotspotCredentials? = null
     private var pendingSuggestionCredentials: HotspotCredentials? = null
     private var pendingAddNetworksCredentials: HotspotCredentials? = null
+    private var awaitingAddNetworkConnectionCredentials: HotspotCredentials? = null
+    private var addNetworkStabilityCredentials: HotspotCredentials? = null
+    private var addNetworkFlowStartTime: Long = 0L
+    private var addNetworkRetryCount = 0
+    private val MAX_ADD_NETWORK_RETRIES = 1
     private val enableBluetoothLauncher =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
             if (result.resultCode == RESULT_OK) {
@@ -190,6 +198,7 @@ class ClientActivity : AppCompatActivity() {
                     Log.d(TAG, "Received credentials: ${credentials.ssid}")
                     showConnectionStatus("Got credentials! Preparing fast Wi-Fi handoff...")
                     isConnecting = false
+                    Log.d(TAG, "Calling gattClient.disconnect() after receiving credentials for ${credentials.ssid}")
                     gattClient.disconnect()
                     delay(300)
                     connectToHotspot(credentials)
@@ -253,13 +262,19 @@ class ClientActivity : AppCompatActivity() {
     }
 
     private fun handleAddWifiNetworksResult(resultCode: Int, data: Intent?) {
+        Log.d(TAG, "handleAddWifiNetworksResult: resultCode=$resultCode")
         val credentials = pendingAddNetworksCredentials
         pendingAddNetworksCredentials = null
         if (credentials == null) {
+            Log.w(TAG, "handleAddWifiNetworksResult: No pending credentials")
+            addNetworkFlowStartTime = 0L
             return
         }
+        Log.d(TAG, "handleAddWifiNetworksResult: Processing for SSID=${credentials.ssid}")
 
         if (resultCode != RESULT_OK) {
+            Log.w(TAG, "handleAddWifiNetworksResult: Add-network cancelled or failed for ${credentials.ssid}")
+            addNetworkFlowStartTime = 0L
             showConnectionStatus("Wi-Fi add/connect cancelled. You can retry or use temporary mode.")
             showTemporaryConnectionFallbackDialog(credentials)
             return
@@ -268,8 +283,12 @@ class ClientActivity : AppCompatActivity() {
         @Suppress("DEPRECATION")
         val resultList = data?.getIntArrayExtra(Settings.EXTRA_WIFI_NETWORK_RESULT_LIST)
         val allSucceeded = resultList?.all { it == ADD_WIFI_RESULT_SUCCESS } ?: true
+        Log.d(TAG, "handleAddWifiNetworksResult: allSucceeded=$allSucceeded, resultList=${resultList?.toList()}")
         if (!allSucceeded) {
+            Log.w(TAG, "handleAddWifiNetworksResult: System could not add/connect ${credentials.ssid} reliably")
+            addNetworkFlowStartTime = 0L
             showConnectionStatus("System could not add/connect this network reliably.")
+            prepareFastWifiHandoff(credentials)
             val suggestionStarted = connectToHotspotViaSuggestion(credentials)
             if (!suggestionStarted) {
                 showTemporaryConnectionFallbackDialog(credentials)
@@ -277,8 +296,11 @@ class ClientActivity : AppCompatActivity() {
             return
         }
 
+        // Flags and monitoring already set in connectToHotspotViaAddNetworks before intent launch
+        // Just verify and log status
+        Log.d(TAG, "handleAddWifiNetworksResult: Add-network accepted for ${credentials.ssid}; monitoring already active")
+        Log.d(TAG, "handleAddWifiNetworksResult: Verified addNetworkStabilityCredentials=${addNetworkStabilityCredentials?.ssid}")
         showConnectionStatus("System accepted ${credentials.ssid}. Waiting for connection...")
-        monitorSuggestionConnection(credentials)
     }
 
     private fun connectToServer(server: com.agentkosticka.easierspot.ble.client.DiscoveredServer) {
@@ -299,13 +321,22 @@ class ClientActivity : AppCompatActivity() {
     }
 
     private fun connectToHotspot(credentials: HotspotCredentials) {
+        Log.d(TAG, "connectToHotspot: Starting connection to SSID=${credentials.ssid}")
+        
+        // Reset retry counter when starting a new connection to a different SSID
+        if (addNetworkStabilityCredentials?.ssid != credentials.ssid) {
+            addNetworkRetryCount = 0
+            Log.d(TAG, "connectToHotspot: Reset retry counter for new SSID ${credentials.ssid}")
+        }
+        
         if (!ensureWifiEnabled(credentials)) {
+            Log.d(TAG, "connectToHotspot: WiFi not enabled, waiting")
             return
         }
 
-        prepareFastWifiHandoff(credentials)
-
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            Log.d(TAG, "connectToHotspot: SDK < Q, using legacy manual connection path")
+            prepareFastWifiHandoff(credentials)
             Toast.makeText(
                 this,
                 "Please connect manually in Wi-Fi settings: ${credentials.ssid}",
@@ -316,16 +347,20 @@ class ClientActivity : AppCompatActivity() {
         }
 
         if (!hasRequiredPermissions()) {
+            Log.w(TAG, "connectToHotspot: Missing required permissions")
             Toast.makeText(this, "Missing permissions to request Wi-Fi connection", Toast.LENGTH_LONG).show()
             return
         }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            Log.d(TAG, "connectToHotspot: SDK >= R, using add-network path for ${credentials.ssid}")
+            prepareWifiHandoffForAddNetworks(credentials)
             val addNetworksStarted = connectToHotspotViaAddNetworks(credentials)
             if (addNetworksStarted) {
                 return
             }
 
+            prepareFastWifiHandoff(credentials)
             val suggestionStarted = connectToHotspotViaSuggestion(credentials)
             if (suggestionStarted) {
                 showConnectionStatus("Add-network unavailable. Using suggestion for ${credentials.ssid}...")
@@ -337,10 +372,13 @@ class ClientActivity : AppCompatActivity() {
         }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            Log.d(TAG, "connectToHotspot: SDK >= Q but < R, using suggestion path for ${credentials.ssid}")
+            prepareFastWifiHandoff(credentials)
             val started = connectToHotspotViaSuggestion(credentials)
             if (started) {
                 return
             }
+            Log.w(TAG, "connectToHotspot: Suggestion connection failed to start for ${credentials.ssid}")
             showTemporaryConnectionFallbackDialog(credentials)
             return
         }
@@ -389,8 +427,6 @@ class ClientActivity : AppCompatActivity() {
     private fun connectToHotspotViaAddNetworks(credentials: HotspotCredentials): Boolean {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return false
 
-        prepareWifiHandoffForAddNetworks(credentials)
-
         val suggestion = buildNetworkSuggestion(credentials)
         val intent = Intent(Settings.ACTION_WIFI_ADD_NETWORKS).apply {
             putParcelableArrayListExtra(
@@ -400,42 +436,54 @@ class ClientActivity : AppCompatActivity() {
         }
 
         pendingAddNetworksCredentials = credentials
+        awaitingAddNetworkConnectionCredentials = credentials
+        addNetworkStabilityCredentials = credentials
+        addNetworkFlowStartTime = System.currentTimeMillis()
+        Log.d(TAG, "connectToHotspotViaAddNetworks: Starting add-network flow at $addNetworkFlowStartTime for ${credentials.ssid}")
+        Log.d(TAG, "connectToHotspotViaAddNetworks: Set addNetworkStabilityCredentials=${credentials.ssid} BEFORE launching intent")
+        
+        // Register network monitoring BEFORE launching the intent
+        // This ensures we catch the connection event when Android connects during the dialog
+        Log.d(TAG, "connectToHotspotViaAddNetworks: Registering network monitoring for ${credentials.ssid}")
+        monitorSuggestionConnection(credentials)
+        
         showConnectionStatus("Confirm connection to ${credentials.ssid} in system dialog...")
         addWifiNetworksLauncher.launch(intent)
         return true
     }
 
     private fun prepareWifiHandoffForAddNetworks(credentials: HotspotCredentials) {
+        Log.d(TAG, "prepareWifiHandoffForAddNetworks: Entry for SSID=${credentials.ssid}")
         val wifiManager = applicationContext.getSystemService(WIFI_SERVICE) as WifiManager
-        @Suppress("DEPRECATION")
-        val currentSsid = normalizeSsid(wifiManager.connectionInfo?.ssid)
-        if (currentSsid.isBlank() || currentSsid == credentials.ssid) {
-            return
+        val suggestion = buildNetworkSuggestion(credentials)
+        runCatching {
+            wifiManager.removeNetworkSuggestions(listOf(suggestion))
+            Log.d(TAG, "prepareWifiHandoffForAddNetworks: Removed previous suggestions for ${credentials.ssid}")
+        }.onFailure {
+            Log.d(TAG, "prepareWifiHandoffForAddNetworks: Could not clear previous suggestion for add-network ${credentials.ssid}: ${it.message}")
         }
-
-        @Suppress("DEPRECATION")
-        val disconnected = runCatching { wifiManager.disconnect() }.getOrDefault(false)
-        if (disconnected) {
-            Log.d(TAG, "Disconnected from $currentSsid before add-network handoff to ${credentials.ssid}")
-        } else {
-            Log.d(TAG, "Could not disconnect from $currentSsid before add-network handoff")
-        }
+        Log.d(TAG, "prepareWifiHandoffForAddNetworks: Prepared add-network handoff for ${credentials.ssid} without forced disconnect")
     }
 
     private fun prepareFastWifiHandoff(credentials: HotspotCredentials) {
+        Log.d(TAG, "prepareFastWifiHandoff: Entry for SSID=${credentials.ssid}")
         val wifiManager = applicationContext.getSystemService(WIFI_SERVICE) as WifiManager
         val suggestion = buildNetworkSuggestion(credentials)
 
         runCatching {
             wifiManager.removeNetworkSuggestions(listOf(suggestion))
+            Log.d(TAG, "prepareFastWifiHandoff: Called removeNetworkSuggestions() for ${credentials.ssid}")
         }.onFailure {
-            Log.d(TAG, "Could not clear previous suggestion for ${credentials.ssid}: ${it.message}")
+            Log.d(TAG, "prepareFastWifiHandoff: Could not clear previous suggestion for ${credentials.ssid}: ${it.message}")
         }
 
         @Suppress("DEPRECATION")
         val disconnected = runCatching { wifiManager.disconnect() }.getOrDefault(false)
+        Log.d(TAG, "prepareFastWifiHandoff: Called wifiManager.disconnect() with result=$disconnected for ${credentials.ssid}")
         if (disconnected) {
-            Log.d(TAG, "Pre-join Wi-Fi disconnect requested for fast handoff to ${credentials.ssid}")
+            Log.d(TAG, "prepareFastWifiHandoff: Pre-join Wi-Fi disconnect requested for fast handoff to ${credentials.ssid}")
+        } else {
+            Log.w(TAG, "prepareFastWifiHandoff: Wi-Fi disconnect failed or returned false for ${credentials.ssid}")
         }
     }
 
@@ -456,9 +504,12 @@ class ClientActivity : AppCompatActivity() {
 
         val callback = object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) {
+                Log.d(TAG, "monitorSuggestionConnection.onAvailable: Network available for ${credentials.ssid}")
                 val wifiManager = applicationContext.getSystemService(WIFI_SERVICE) as WifiManager
                 val currentSsid = normalizeSsid(wifiManager.connectionInfo?.ssid)
+                Log.d(TAG, "monitorSuggestionConnection.onAvailable: currentSsid=$currentSsid, expectedSsid=${credentials.ssid}")
                 if (currentSsid != credentials.ssid) {
+                    Log.w(TAG, "monitorSuggestionConnection.onAvailable: SSID mismatch, early return (current=$currentSsid, expected=${credentials.ssid})")
                     return
                 }
 
@@ -468,6 +519,92 @@ class ClientActivity : AppCompatActivity() {
 
                 pendingSuggestionCredentials = null
                 suggestionFallbackJob?.cancel()
+
+                val requiresAddNetworkStabilityGate =
+                    addNetworkStabilityCredentials?.ssid == credentials.ssid
+                Log.d(TAG, "monitorSuggestionConnection.onAvailable: requiresAddNetworkStabilityGate=$requiresAddNetworkStabilityGate for ${credentials.ssid}")
+                if (requiresAddNetworkStabilityGate) {
+                    Log.d(TAG, "monitorSuggestionConnection.onAvailable: Network available for ${credentials.ssid}; running stability gate")
+                    addNetworkStabilityJob?.cancel()
+                    addNetworkStabilityJob = lifecycleScope.launch {
+                        try {
+                            withTimeout(10_000L) {
+                                Log.d(TAG, "StabilityGate: Started for ${credentials.ssid}")
+                                runOnUiThread {
+                                    showConnectionStatus("Connected to ${credentials.ssid}. Verifying stability...")
+                                }
+                                delay(1500)
+                                Log.d(TAG, "StabilityGate: Checking SSID after 1.5s delay for ${credentials.ssid}")
+                                val refreshedWifiManager = applicationContext.getSystemService(WIFI_SERVICE) as WifiManager
+                                @Suppress("DEPRECATION")
+                                val stableSsid = normalizeSsid(refreshedWifiManager.connectionInfo?.ssid)
+                                Log.d(TAG, "StabilityGate: stableSsid=$stableSsid, expectedSsid=${credentials.ssid}")
+                                if (stableSsid == credentials.ssid) {
+                                    addNetworkStabilityCredentials = null
+                                    awaitingAddNetworkConnectionCredentials = null
+                                    addNetworkFlowStartTime = 0L
+                                    addNetworkRetryCount = 0  // Reset retry counter on success
+                                    Log.d(TAG, "StabilityGate: PASSED for ${credentials.ssid}, clearing stability credentials and flow timestamp")
+                                    runOnUiThread {
+                                        val stableMessage = "Connected to ${credentials.ssid}"
+                                        showConnectionStatus(stableMessage)
+                                        dismissConnectionStatus()
+                                        Toast.makeText(this@ClientActivity, stableMessage, Toast.LENGTH_LONG).show()
+                                    }
+                                    Log.d(TAG, "StabilityGate: Stability gate passed for ${credentials.ssid}")
+                                } else {
+                                    Log.w(TAG, "StabilityGate: FAILED for ${credentials.ssid}; current SSID=$stableSsid")
+                                    
+                                    // Auto-retry on first-time disconnect (when SSID becomes unknown)
+                                    if (stableSsid == "<unknown ssid>" && addNetworkRetryCount < MAX_ADD_NETWORK_RETRIES) {
+                                        Log.w(TAG, "StabilityGate: First connection attempt failed with unknown SSID, retrying... (attempt ${addNetworkRetryCount + 1}/$MAX_ADD_NETWORK_RETRIES)")
+                                        addNetworkRetryCount++
+                                        
+                                        // Clear state for retry
+                                        addNetworkStabilityCredentials = null
+                                        awaitingAddNetworkConnectionCredentials = null
+                                        addNetworkFlowStartTime = 0L
+                                        
+                                        runOnUiThread {
+                                            showConnectionStatus("First connection unstable, retrying ${credentials.ssid}...")
+                                            // Re-launch add-network flow
+                                            connectToHotspot(credentials)
+                                        }
+                                    } else {
+                                        // Either not unknown SSID or retry exhausted
+                                        if (addNetworkRetryCount >= MAX_ADD_NETWORK_RETRIES) {
+                                            Log.w(TAG, "StabilityGate: Retry limit reached for ${credentials.ssid}")
+                                        }
+                                        runOnUiThread {
+                                            showConnectionStatus("Connection to ${credentials.ssid} changed. Waiting...")
+                                        }
+                                    }
+                                }
+                            }
+                        } catch (e: TimeoutCancellationException) {
+                            Log.w(TAG, "StabilityGate: TIMEOUT for ${credentials.ssid} - 10 second limit exceeded")
+                            addNetworkStabilityCredentials = null
+                            awaitingAddNetworkConnectionCredentials = null
+                            addNetworkFlowStartTime = 0L
+                            runOnUiThread {
+                                showConnectionStatus("Connection to ${credentials.ssid} timed out")
+                                dismissConnectionStatus()
+                                
+                                AlertDialog.Builder(this@ClientActivity)
+                                    .setTitle("Connection Timeout")
+                                    .setMessage("Failed to verify connection to ${credentials.ssid}. Would you like to retry?")
+                                    .setPositiveButton("Retry") { _, _ ->
+                                        Log.d(TAG, "StabilityGate: User requested retry for ${credentials.ssid}")
+                                        prepareWifiHandoffForAddNetworks(credentials)
+                                        connectToHotspotViaAddNetworks(credentials)
+                                    }
+                                    .setNegativeButton("Cancel", null)
+                                    .show()
+                            }
+                        }
+                    }
+                    return
+                }
 
                 runOnUiThread {
                     val message = if (validated) {
@@ -484,11 +621,57 @@ class ClientActivity : AppCompatActivity() {
             }
 
             override fun onUnavailable() {
+                // Get current SSID for verification
+                val currentWifiManager = applicationContext.getSystemService(WIFI_SERVICE) as WifiManager
+                @Suppress("DEPRECATION")
+                val currentSsid = normalizeSsid(currentWifiManager.connectionInfo?.ssid)
+                
+                val timeSinceFlowStart = if (addNetworkFlowStartTime > 0) {
+                    System.currentTimeMillis() - addNetworkFlowStartTime
+                } else {
+                    Long.MAX_VALUE
+                }
+                
+                Log.w(TAG, "monitorSuggestionConnection.onUnavailable fired: " +
+                    "currentSSID=$currentSsid, " +
+                    "expectedSSID=${credentials.ssid}, " +
+                    "inAddNetworkFlow=${pendingAddNetworksCredentials != null || awaitingAddNetworkConnectionCredentials != null}, " +
+                    "stabilityGateRunning=${addNetworkStabilityCredentials != null}, " +
+                    "timeSinceFlowStart=${timeSinceFlowStart}ms")
+                
                 runOnUiThread {
-                    if (pendingAddNetworksCredentials == credentials) {
+                    // Guard 1: Still in add-network flow (pending or awaiting connection)
+                    if (pendingAddNetworksCredentials == credentials ||
+                        awaitingAddNetworkConnectionCredentials?.ssid == credentials.ssid
+                    ) {
+                        Log.d(TAG, "monitorSuggestionConnection.onUnavailable: Still waiting for add-network flow for ${credentials.ssid}")
                         showConnectionStatus("Suggestion unavailable. Waiting for add-network flow...")
                         return@runOnUiThread
                     }
+                    
+                    // Guard 2: Stability gate is still running - don't interfere
+                    if (addNetworkStabilityCredentials?.ssid == credentials.ssid) {
+                        Log.d(TAG, "monitorSuggestionConnection.onUnavailable: Stability gate still running for ${credentials.ssid}, ignoring premature callback")
+                        showConnectionStatus("Network initializing for ${credentials.ssid}...")
+                        return@runOnUiThread
+                    }
+                    
+                    // Guard 3: Too soon after add-network flow started (within 5 seconds)
+                    if (timeSinceFlowStart < 5000) {
+                        Log.d(TAG, "monitorSuggestionConnection.onUnavailable: Too soon after flow start (${timeSinceFlowStart}ms), ignoring premature callback")
+                        showConnectionStatus("Establishing connection to ${credentials.ssid}...")
+                        return@runOnUiThread
+                    }
+                    
+                    // Guard 4: Verify we're not already connected to the target SSID
+                    if (currentSsid == credentials.ssid) {
+                        Log.w(TAG, "monitorSuggestionConnection.onUnavailable: Already connected to ${credentials.ssid}, ignoring stale callback")
+                        showConnectionStatus("Already connected to ${credentials.ssid}")
+                        return@runOnUiThread
+                    }
+                    
+                    // All guards passed - show fallback dialog
+                    Log.w(TAG, "monitorSuggestionConnection.onUnavailable: All guards passed, showing fallback dialog for ${credentials.ssid}")
                     showConnectionStatus("System connection unavailable for ${credentials.ssid}")
                     showTemporaryConnectionFallbackDialog(credentials)
                 }
@@ -536,8 +719,9 @@ class ClientActivity : AppCompatActivity() {
 
             override fun onUnavailable() {
                 super.onUnavailable()
+                Log.w(TAG, "connectToHotspotViaSpecifier.onUnavailable: Network unavailable for ${credentials.ssid}, calling bindProcessToNetwork(null)")
                 connectivityManager.bindProcessToNetwork(null)
-                Log.w(TAG, "Hotspot network unavailable: ${credentials.ssid}")
+                Log.w(TAG, "connectToHotspotViaSpecifier.onUnavailable: Hotspot network unavailable: ${credentials.ssid}")
                 runOnUiThread {
                     Toast.makeText(
                         this@ClientActivity,
@@ -600,37 +784,85 @@ class ClientActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        Log.d(TAG, "onDestroy: Entry - isConnecting=$isConnecting, pendingCredentials=$pendingCredentials")
+        Log.d(TAG, "onDestroy: pendingSuggestionCredentials=${pendingSuggestionCredentials?.ssid}, addNetworkStabilityCredentials=${addNetworkStabilityCredentials?.ssid}")
+        Log.d(TAG, "onDestroy: pendingAddNetworksCredentials=${pendingAddNetworksCredentials?.ssid}, awaitingAddNetworkConnectionCredentials=${awaitingAddNetworkConnectionCredentials?.ssid}")
         dismissConnectionStatus()
         super.onDestroy()
-        Log.d(TAG, "onDestroy()")
+        Log.d(TAG, "onDestroy: Cancelling jobs and cleaning up callbacks")
         suggestionFallbackJob?.cancel()
+        addNetworkStabilityJob?.cancel()
         suggestionPostConnectReceiver?.let {
             runCatching { unregisterReceiver(it) }
         }
         suggestionPostConnectReceiver = null
+        
+        // CRITICAL FIX: Check if add-network connection is pending before unbinding
+        // Root cause of first-time disconnect: bindProcessToNetwork(null) was being called
+        // while the system dialog was open, disconnecting the network we just requested.
+        val isAddNetworkPending = pendingAddNetworksCredentials != null ||
+                                   awaitingAddNetworkConnectionCredentials != null ||
+                                   addNetworkStabilityCredentials != null
+        
         hotspotNetworkCallback?.let {
             runCatching {
-                getSystemService(ConnectivityManager::class.java).bindProcessToNetwork(null)
+                if (!isAddNetworkPending) {
+                    Log.d(TAG, "onDestroy: No pending add-network connection - safe to unbind")
+                    getSystemService(ConnectivityManager::class.java).bindProcessToNetwork(null)
+                } else {
+                    Log.w(TAG, "onDestroy: *** SKIPPING bindProcessToNetwork(null) - add-network connection is pending! ***")
+                    Log.w(TAG, "onDestroy: This preserves the network binding during system dialog and stability gate.")
+                    // NOTE: The network binding will persist across activity recreation (e.g., rotation).
+                    // This is intentional to keep the Wi-Fi connection alive. Consider adding
+                    // android:configChanges="orientation|screenSize" to AndroidManifest.xml
+                    // to avoid activity recreation entirely during configuration changes.
+                }
                 getSystemService(ConnectivityManager::class.java).unregisterNetworkCallback(it)
             }
         }
         suggestionNetworkCallback?.let {
+            Log.d(TAG, "onDestroy: Unregistering suggestionNetworkCallback")
             runCatching {
                 getSystemService(ConnectivityManager::class.java).unregisterNetworkCallback(it)
             }
         }
+        Log.d(TAG, "onDestroy: Stopping BLE scan and disconnecting GATT")
         bleScanner.stopScan()
         gattClient.disconnect()
+        Log.d(TAG, "onDestroy: Complete")
     }
 
     override fun onResume() {
         super.onResume()
+        Log.d(TAG, "onResume: pendingCredentials=${pendingCredentials?.ssid}")
         val pending = pendingCredentials ?: return
         val wifiManager = applicationContext.getSystemService(WIFI_SERVICE) as WifiManager
         if (wifiManager.isWifiEnabled) {
+            Log.d(TAG, "onResume: WiFi enabled, connecting to pending credentials: ${pending.ssid}")
             pendingCredentials = null
             connectToHotspot(pending)
+        } else {
+            Log.d(TAG, "onResume: WiFi still disabled, keeping pending credentials")
         }
+    }
+
+    override fun onPause() {
+        super.onPause()
+        Log.d(TAG, "onPause: isConnecting=$isConnecting, pendingCredentials=${pendingCredentials?.ssid}")
+        Log.d(TAG, "onPause: addNetworkStabilityCredentials=${addNetworkStabilityCredentials?.ssid}, awaitingAddNetworkConnectionCredentials=${awaitingAddNetworkConnectionCredentials?.ssid}")
+        Log.d(TAG, "onPause: pendingAddNetworksCredentials=${pendingAddNetworksCredentials?.ssid}")
+        // NOTE: We don't tear down network state here. The connection process must survive
+        // activity pause events (e.g., when system dialog appears or user switches apps).
+    }
+
+    override fun onStop() {
+        super.onStop()
+        Log.d(TAG, "onStop: isConnecting=$isConnecting, pendingCredentials=${pendingCredentials?.ssid}")
+        Log.d(TAG, "onStop: addNetworkStabilityCredentials=${addNetworkStabilityCredentials?.ssid}, awaitingAddNetworkConnectionCredentials=${awaitingAddNetworkConnectionCredentials?.ssid}")
+        Log.d(TAG, "onStop: pendingAddNetworksCredentials=${pendingAddNetworksCredentials?.ssid}")
+        // NOTE: We don't tear down network state here. The connection process must survive
+        // activity stop events (e.g., when system dialog appears or user switches to another app).
+        Log.d(TAG, "onStop: addNetworkStabilityCredentials=${addNetworkStabilityCredentials?.ssid}, awaitingAddNetworkConnectionCredentials=${awaitingAddNetworkConnectionCredentials?.ssid}")
     }
 
     private fun registerSuggestionPostConnectReceiver() {
