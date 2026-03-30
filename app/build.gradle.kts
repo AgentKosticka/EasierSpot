@@ -13,10 +13,10 @@ android {
 
     defaultConfig {
         applicationId = "com.agentkosticka.easierspot"
-        minSdk = 31  // Android 12 - both test devices are Android 16
+        minSdk = 31
         targetSdk = 36
         versionCode = 1
-        versionName = "1.0"
+        versionName = "1.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
