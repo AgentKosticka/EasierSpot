@@ -9,11 +9,13 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.os.Binder
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
+import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import com.agentkosticka.easierspot.R
 import com.agentkosticka.easierspot.ble.server.BleAdvertiser
@@ -24,8 +26,10 @@ import com.agentkosticka.easierspot.data.model.RememberedServer
 import com.agentkosticka.easierspot.hotspot.HotspotManager
 import com.agentkosticka.easierspot.ui.server.ServerActivity
 import com.agentkosticka.easierspot.util.LogUtils
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -48,11 +52,24 @@ class BleHotspotService : Service() {
         const val EXTRA_CLIENT_ADDRESS = "client_address"
         const val EXTRA_CLIENT_DEVICE_ID = "client_device_id"
         const val EXTRA_CLIENT_NAME = "client_name"
+        @Volatile
+        var isServerRunning: Boolean = false
+            private set
+        private const val STATE_PREFS = "server_service_state"
+        private const val KEY_RUNNING = "running"
     }
 
     private var bleAdvertiser: BleAdvertiser? = null
     private var gattServer: GattServer? = null
     private var hotspotManager: HotspotManager? = null
+    private var currentDeviceId: String? = null
+    private var explicitStopRequested: Boolean = false
+    private val serviceJob = SupervisorJob()
+    private val serviceScope = CoroutineScope(
+        serviceJob + Dispatchers.IO + CoroutineExceptionHandler { _, throwable ->
+            LogUtils.e(TAG, "Service coroutine failed", throwable)
+        }
+    )
     private val binder = LocalBinder()
     private val database by lazy { AppDatabase.getDatabase(this) }
 
@@ -74,16 +91,28 @@ class BleHotspotService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         try {
             val notification = createNotification()
-            startForeground(NOTIFICATION_ID, notification)
+            val serviceType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
+            } else {
+                0
+            }
+            ServiceCompat.startForeground(this, NOTIFICATION_ID, notification, serviceType)
 
             when (intent?.action) {
                 ACTION_START_SERVER -> {
                     val deviceId = intent.getStringExtra(EXTRA_DEVICE_ID) ?: UUID.randomUUID().toString().take(4)
+                    explicitStopRequested = false
+                    currentDeviceId = deviceId
                     LogUtils.i(TAG, "Starting BLE server with deviceId: $deviceId")
                     startBleServer(deviceId)
+                    isServerRunning = true
+                    persistServerState(true)
                 }
                 ACTION_STOP_SERVER -> {
+                    explicitStopRequested = true
                     stopBleServer()
+                    isServerRunning = false
+                    persistServerState(false)
                     stopSelf()
                 }
                 ACTION_APPROVE_CLIENT -> {
@@ -154,10 +183,12 @@ class BleHotspotService : Service() {
         gattServer?.stopServer()
         bleAdvertiser = null
         gattServer = null
+        isServerRunning = false
+        persistServerState(false)
     }
 
     private fun checkAndRequestApproval(clientAddress: String, clientStableId: String?) {
-        CoroutineScope(Dispatchers.IO).launch {
+        serviceScope.launch {
             val dao = database.rememberedServerDao()
             val server = if (!clientStableId.isNullOrBlank()) {
                 dao.getServerById(clientStableId) ?: dao.getServerByAddress(clientAddress)
@@ -273,7 +304,7 @@ class BleHotspotService : Service() {
     }
 
     private fun approveClient(clientAddress: String, clientDeviceId: String, clientName: String) {
-        CoroutineScope(Dispatchers.IO).launch {
+        serviceScope.launch {
             database.rememberedServerDao().insertServer(
                 RememberedServer(
                     deviceId = clientDeviceId,
@@ -322,8 +353,31 @@ class BleHotspotService : Service() {
     }
 
     override fun onDestroy() {
+        val shouldRestart = isServerRunning && !explicitStopRequested
+        val restartDeviceId = currentDeviceId ?: UUID.randomUUID().toString().take(4)
+        serviceJob.cancel()
         super.onDestroy()
         stopBleServer()
+        if (shouldRestart) {
+            LogUtils.w(TAG, "Service destroyed unexpectedly, restarting foreground service")
+            persistServerState(true)
+            val restartIntent = Intent(this, BleHotspotService::class.java).apply {
+                action = ACTION_START_SERVER
+                putExtra(EXTRA_DEVICE_ID, restartDeviceId)
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                ContextCompat.startForegroundService(this, restartIntent)
+            } else {
+                startService(restartIntent)
+            }
+        }
+    }
+
+    private fun persistServerState(running: Boolean) {
+        getSharedPreferences(STATE_PREFS, Context.MODE_PRIVATE)
+            .edit()
+            .putBoolean(KEY_RUNNING, running)
+            .apply()
     }
 
     private fun createNotificationChannel() {
@@ -362,7 +416,13 @@ class BleHotspotService : Service() {
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
-            .build()
+            .setAutoCancel(false)
+            .setOnlyAlertOnce(true)
+            .setCategory(NotificationCompat.CATEGORY_SERVICE)
+            .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
+            .build().apply {
+                flags = flags or Notification.FLAG_ONGOING_EVENT or Notification.FLAG_NO_CLEAR
+            }
     }
 
     private fun canPostNotifications(): Boolean {

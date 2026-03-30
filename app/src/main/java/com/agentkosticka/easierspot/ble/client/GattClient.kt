@@ -37,8 +37,6 @@ class GattClient(private val context: Context) {
         private const val TARGET_MTU = 517
         private const val APPROVAL_POLL_INTERVAL_MS = 2000L
         private const val APPROVAL_POLL_MAX_ATTEMPTS = 30 // 60 seconds max wait
-        private val CLIENT_CONFIG_DESCRIPTOR_UUID: UUID =
-            UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
     }
 
     private val bluetoothManager = context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
@@ -236,8 +234,8 @@ class GattClient(private val context: Context) {
             return
         }
 
-        val approvalCccd = approvalChar.getDescriptor(CLIENT_CONFIG_DESCRIPTOR_UUID)
-        val hotspotCccd = hotspotChar.getDescriptor(CLIENT_CONFIG_DESCRIPTOR_UUID)
+        val approvalCccd = approvalChar.getDescriptor(BleConstants.CLIENT_CONFIG_DESCRIPTOR_UUID)
+        val hotspotCccd = hotspotChar.getDescriptor(BleConstants.CLIENT_CONFIG_DESCRIPTOR_UUID)
         if (approvalCccd == null || hotspotCccd == null) {
             _gattError.value = "CCCD descriptor missing on server"
             return
@@ -446,7 +444,7 @@ class GattClient(private val context: Context) {
             if (descriptor.characteristic.uuid == BleConstants.CHAR_APPROVAL_STATUS) {
                 val hotspotChar = gatt.getService(BleConstants.SERVICE_UUID)
                     ?.getCharacteristic(BleConstants.CHAR_HOTSPOT_DATA)
-                val hotspotCccd = hotspotChar?.getDescriptor(CLIENT_CONFIG_DESCRIPTOR_UUID)
+                val hotspotCccd = hotspotChar?.getDescriptor(BleConstants.CLIENT_CONFIG_DESCRIPTOR_UUID)
                 if (hotspotCccd != null) {
                     hotspotCccd.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
                     if (!gatt.writeDescriptor(hotspotCccd)) {

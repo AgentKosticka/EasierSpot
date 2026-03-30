@@ -22,7 +22,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.nio.ByteBuffer
 import java.nio.charset.StandardCharsets
-import java.util.UUID
 
 data class ClientConnection(
     val address: String,
@@ -34,8 +33,6 @@ data class ClientConnection(
 class GattServer(private val context: Context, private val deviceId: String) {
     companion object {
         private const val TAG = "GattServer"
-        private val CLIENT_CONFIG_DESCRIPTOR_UUID: UUID =
-            UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
     }
 
     private val bluetoothManager = context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
@@ -173,7 +170,7 @@ class GattServer(private val context: Context, private val deviceId: String) {
         )
         hotspotDataChar.addDescriptor(
             BluetoothGattDescriptor(
-                CLIENT_CONFIG_DESCRIPTOR_UUID,
+                BleConstants.CLIENT_CONFIG_DESCRIPTOR_UUID,
                 BluetoothGattDescriptor.PERMISSION_READ or BluetoothGattDescriptor.PERMISSION_WRITE
             )
         )
@@ -187,7 +184,7 @@ class GattServer(private val context: Context, private val deviceId: String) {
         )
         approvalStatusChar.addDescriptor(
             BluetoothGattDescriptor(
-                CLIENT_CONFIG_DESCRIPTOR_UUID,
+                BleConstants.CLIENT_CONFIG_DESCRIPTOR_UUID,
                 BluetoothGattDescriptor.PERMISSION_READ or BluetoothGattDescriptor.PERMISSION_WRITE
             )
         )
@@ -363,7 +360,7 @@ class GattServer(private val context: Context, private val deviceId: String) {
                 gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, offset, null)
             }
 
-            if (descriptor.uuid != CLIENT_CONFIG_DESCRIPTOR_UUID || value == null) {
+            if (descriptor.uuid != BleConstants.CLIENT_CONFIG_DESCRIPTOR_UUID || value == null) {
                 return
             }
 

@@ -3,6 +3,7 @@ package com.agentkosticka.easierspot.ui.server
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothManager
 import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.os.Build
@@ -29,6 +30,8 @@ class ServerActivity : AppCompatActivity(), ApprovalDialog.ApprovalListener {
         private const val REQUEST_ENABLE_BT = 1001
         private const val APPROVAL_DIALOG_TAG = "approval_dialog"
         private const val TEST_DIALOG_TAG = "test_dialog"
+        private const val STATE_PREFS = "server_service_state"
+        private const val KEY_RUNNING = "running"
     }
     
     private val deviceId = UUID.randomUUID().toString().take(4)
@@ -102,6 +105,7 @@ class ServerActivity : AppCompatActivity(), ApprovalDialog.ApprovalListener {
             stopButton.isEnabled = false
             showPendingApprovalIfPresent(intent)
             observeRememberedDevices()
+            syncServerUiState()
         } catch (e: Exception) {
             Toast.makeText(this, "Error initializing: ${e.message}", Toast.LENGTH_LONG).show()
             finish()
@@ -186,9 +190,8 @@ class ServerActivity : AppCompatActivity(), ApprovalDialog.ApprovalListener {
                         } else {
                             startService(serviceIntent)
                         }
-
-                        findViewById<Button>(R.id.btn_start_sharing).isEnabled = false
-                        findViewById<Button>(R.id.btn_stop_sharing).isEnabled = true
+                        persistServerState(true)
+                        syncServerUiState()
                     } catch (e: Exception) {
                         LogUtils.e(TAG, "Error starting service", e)
                         Toast.makeText(this, "Service start failed: ${e.message}", Toast.LENGTH_LONG).show()
@@ -225,6 +228,26 @@ class ServerActivity : AppCompatActivity(), ApprovalDialog.ApprovalListener {
             action = BleHotspotService.ACTION_STOP_SERVER
         }
         startService(serviceIntent)
+        persistServerState(false)
+        syncServerUiState()
+    }
+
+    private fun syncServerUiState() {
+        val isRunning = readPersistedServerState()
+        findViewById<Button>(R.id.btn_start_sharing).isEnabled = !isRunning
+        findViewById<Button>(R.id.btn_stop_sharing).isEnabled = isRunning
+    }
+
+    private fun persistServerState(running: Boolean) {
+        getSharedPreferences(STATE_PREFS, Context.MODE_PRIVATE)
+            .edit()
+            .putBoolean(KEY_RUNNING, running)
+            .apply()
+    }
+
+    private fun readPersistedServerState(): Boolean {
+        return getSharedPreferences(STATE_PREFS, Context.MODE_PRIVATE)
+            .getBoolean(KEY_RUNNING, false)
     }
 
     override fun onApprove(deviceId: String, deviceAddress: String) {
@@ -258,6 +281,7 @@ class ServerActivity : AppCompatActivity(), ApprovalDialog.ApprovalListener {
 
     override fun onStart() {
         super.onStart()
+        syncServerUiState()
         if (!approvalReceiverRegistered) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 registerReceiver(
@@ -279,5 +303,10 @@ class ServerActivity : AppCompatActivity(), ApprovalDialog.ApprovalListener {
             unregisterReceiver(approvalReceiver)
             approvalReceiverRegistered = false
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        syncServerUiState()
     }
 }
