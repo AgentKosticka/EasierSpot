@@ -61,6 +61,8 @@ class BleHotspotService : Service() {
         const val EXTRA_APPROVAL_DISPLAY_ID = "approval_display_id"
         const val EXTRA_APPROVAL_DISPLAY_NAME = "approval_display_name"
         const val EXTRA_APPROVAL_NICKNAME = "approval_nickname"
+        const val ACTION_RESHOW_NOTIFICATION = "com.agentkosticka.easierspot.RESHOW_NOTIFICATION"
+
         @Volatile
         var isServerRunning: Boolean = false
             private set
@@ -170,6 +172,11 @@ class BleHotspotService : Service() {
                         displayName = displayName,
                         nickname = nickname
                     )
+                }
+                ACTION_RESHOW_NOTIFICATION -> {
+                    val notification = createNotification()
+                    val notificationManager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+                    notificationManager.notify(NOTIFICATION_ID, notification)
                 }
             }
         } catch (e: Exception) {
@@ -578,17 +585,27 @@ class BleHotspotService : Service() {
         val pendingIntentFlags = PendingIntent.FLAG_IMMUTABLE
         val pendingIntent = PendingIntent.getActivity(this, 0, intent, pendingIntentFlags)
 
+        val reshowIntent = Intent(this, BleHotspotService::class.java).apply {
+            action = ACTION_RESHOW_NOTIFICATION
+        }
+        val reshowPendingIntent = PendingIntent.getService(
+            this, 2, reshowIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
         return NotificationCompat.Builder(this, SERVICE_CHANNEL_ID)
-            .setContentTitle("EasierSpot")
-            .setContentText("Hotspot sharing active")
+            .setContentTitle("Hotspot sharing active")
+            .setContentText("Click here to open app")
             .setSmallIcon(R.drawable.ic_launcher_foreground)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
             .setAutoCancel(false)
+            .setSilent(true)
             .setOnlyAlertOnce(true)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
+            .setDeleteIntent(reshowPendingIntent)
             .build().apply {
                 flags = flags or Notification.FLAG_ONGOING_EVENT or Notification.FLAG_NO_CLEAR
             }
