@@ -2,7 +2,6 @@ package com.agentkosticka.easierspot.ble.client
 
 import android.Manifest
 import android.annotation.SuppressLint
-import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothGatt
 import android.bluetooth.BluetoothGattCallback
@@ -12,7 +11,6 @@ import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothProfile
 import android.content.Context
 import android.content.pm.PackageManager
-import android.provider.Settings
 import android.util.Log
 import androidx.core.content.ContextCompat
 import com.agentkosticka.easierspot.ble.BleConstants
@@ -26,7 +24,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import java.nio.ByteBuffer
 import java.nio.charset.StandardCharsets
 import java.util.UUID
 
@@ -38,9 +35,6 @@ class GattClient(private val context: Context) {
         private const val APPROVAL_POLL_INTERVAL_MS = 2000L
         private const val APPROVAL_POLL_MAX_ATTEMPTS = 30 // 60 seconds max wait
     }
-
-    private val bluetoothManager = context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
-    private val bluetoothAdapter = bluetoothManager.adapter
     private var gatt: BluetoothGatt? = null
     private var pendingDeviceIdRead = false
     private var pendingClientIdWrite = false
@@ -62,7 +56,6 @@ class GattClient(private val context: Context) {
     val approvalStatus: StateFlow<ApprovalStatus?> = _approvalStatus.asStateFlow()
 
     private val _serverDeviceId = MutableStateFlow<String?>(null)
-    val serverDeviceId: StateFlow<String?> = _serverDeviceId.asStateFlow()
 
     enum class ConnectionState {
         DISCONNECTED,
@@ -434,7 +427,7 @@ class GattClient(private val context: Context) {
             }
         }
 
-        override fun onDescriptorWrite(gatt: BluetoothGatt, descriptor: android.bluetooth.BluetoothGattDescriptor, status: Int) {
+        override fun onDescriptorWrite(gatt: BluetoothGatt, descriptor: BluetoothGattDescriptor, status: Int) {
             super.onDescriptorWrite(gatt, descriptor, status)
             if (status != BluetoothGatt.GATT_SUCCESS) {
                 _gattError.value = "Descriptor write failed"

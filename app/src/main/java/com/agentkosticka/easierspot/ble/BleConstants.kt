@@ -28,9 +28,4 @@ object BleConstants {
     // Client Characteristic Configuration Descriptor (CCCD)
     // Used by clients to enable notifications/indications
     val CLIENT_CONFIG_DESCRIPTOR_UUID: UUID = UUID.fromString("2df83cb5-ddb1-425a-b36f-535638fbfb05")
-
-    // Constants
-    const val GATT_CONNECTION_TIMEOUT_MS = 10000L
-    const val GATT_OPERATION_TIMEOUT_MS = 5000L
-    const val SCAN_TIMEOUT_MS = 15000L
 }

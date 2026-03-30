@@ -115,9 +115,14 @@ class HotspotManager(private val context: Context) {
             if (!shizukuRunning) {
                 errorMessage = errorMessage ?: "Shizuku is not running"
                 return HotspotDiagnostics(
-                    shizukuRunning, shizukuPermissionGranted, wifiBinderObtained,
-                    wifiManagerObtained, softApConfigObtained, ssidExtracted,
-                    passphraseExtracted, errorMessage
+                    shizukuRunning = false,
+                    shizukuPermissionGranted = false,
+                    wifiBinderObtained = false,
+                    wifiManagerObtained = false,
+                    softApConfigObtained = false,
+                    ssidExtracted = null,
+                    passphraseExtracted = false,
+                    errorMessage = errorMessage
                 )
             }
 
@@ -132,13 +137,18 @@ class HotspotManager(private val context: Context) {
             if (!shizukuPermissionGranted) {
                 errorMessage = errorMessage ?: "Shizuku permission not granted"
                 return HotspotDiagnostics(
-                    shizukuRunning, shizukuPermissionGranted, wifiBinderObtained,
-                    wifiManagerObtained, softApConfigObtained, ssidExtracted,
-                    passphraseExtracted, errorMessage
+                    shizukuRunning = true,
+                    shizukuPermissionGranted = false,
+                    wifiBinderObtained = false,
+                    wifiManagerObtained = false,
+                    softApConfigObtained = false,
+                    ssidExtracted = null,
+                    passphraseExtracted = false,
+                    errorMessage = errorMessage
                 )
             }
 
-            // Step 3: Get wifi binder
+            // Step 3: Get Wi-Fi binder
             val wifiBinder = try {
                 SystemServiceHelper.getSystemService("wifi")
             } catch (e: Exception) {
@@ -150,9 +160,14 @@ class HotspotManager(private val context: Context) {
             if (!wifiBinderObtained) {
                 errorMessage = errorMessage ?: "Failed to obtain wifi binder"
                 return HotspotDiagnostics(
-                    shizukuRunning, shizukuPermissionGranted, wifiBinderObtained,
-                    wifiManagerObtained, softApConfigObtained, ssidExtracted,
-                    passphraseExtracted, errorMessage
+                    shizukuRunning = true,
+                    shizukuPermissionGranted = true,
+                    wifiBinderObtained = false,
+                    wifiManagerObtained = false,
+                    softApConfigObtained = false,
+                    ssidExtracted = null,
+                    passphraseExtracted = false,
+                    errorMessage = errorMessage
                 )
             }
 
@@ -169,9 +184,14 @@ class HotspotManager(private val context: Context) {
             if (!wifiManagerObtained) {
                 errorMessage = errorMessage ?: "Failed to get IWifiManager interface"
                 return HotspotDiagnostics(
-                    shizukuRunning, shizukuPermissionGranted, wifiBinderObtained,
-                    wifiManagerObtained, softApConfigObtained, ssidExtracted,
-                    passphraseExtracted, errorMessage
+                    shizukuRunning = true,
+                    shizukuPermissionGranted = true,
+                    wifiBinderObtained = true,
+                    wifiManagerObtained = false,
+                    softApConfigObtained = false,
+                    ssidExtracted = null,
+                    passphraseExtracted = false,
+                    errorMessage = errorMessage
                 )
             }
 
@@ -187,9 +207,14 @@ class HotspotManager(private val context: Context) {
             if (!softApConfigObtained) {
                 errorMessage = errorMessage ?: "SoftApConfiguration is null"
                 return HotspotDiagnostics(
-                    shizukuRunning, shizukuPermissionGranted, wifiBinderObtained,
-                    wifiManagerObtained, softApConfigObtained, ssidExtracted,
-                    passphraseExtracted, errorMessage
+                    shizukuRunning = true,
+                    shizukuPermissionGranted = true,
+                    wifiBinderObtained = true,
+                    wifiManagerObtained = true,
+                    softApConfigObtained = false,
+                    ssidExtracted = null,
+                    passphraseExtracted = false,
+                    errorMessage = errorMessage
                 )
             }
 
@@ -537,15 +562,6 @@ class HotspotManager(private val context: Context) {
     }
 
     /**
-     * Get intent to open hotspot settings
-     */
-    fun getHotspotSettingsIntent(): Intent {
-        return Intent(android.provider.Settings.ACTION_WIRELESS_SETTINGS).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK
-        }
-    }
-
-    /**
      * Get intent to open tethering settings directly (Android 8+)
      */
     fun getTetheringSettingsIntent(): Intent {
@@ -566,34 +582,6 @@ class HotspotManager(private val context: Context) {
         return Intent(Settings.ACTION_SETTINGS).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK
         }
-    }
-
-    /**
-     * Turn hotspot off
-     */
-    fun stopHotspot(): Boolean {
-        LogUtils.diag(TAG, "stopHotspot() called")
-
-        val enabled = isHotspotEnabled()
-        if (!enabled) {
-            LogUtils.diag(TAG, "Hotspot is already disabled")
-            return true
-        }
-
-        if (!isShizukuReady()) {
-            LogUtils.w(TAG, "Shizuku unavailable; cannot stop hotspot programmatically")
-            return false
-        }
-
-        if (!stopTetheringViaConnector() && !stopTetheringViaShell()) {
-            LogUtils.w(TAG, "Programmatic hotspot disable failed")
-            return false
-        }
-
-        Thread.sleep(500)
-        val stillEnabled = isHotspotEnabled()
-        LogUtils.diag(TAG, "Hotspot state after connector stop: enabled=$stillEnabled")
-        return !stillEnabled
     }
 
     private fun isShizukuReady(): Boolean {
@@ -860,10 +848,11 @@ class HotspotManager(private val context: Context) {
                     publicMethod.invoke(null, command, null, null) as Process
                 }
             } catch (_: NoSuchMethodException) {
-                val binder = Shizuku.getBinder()
-                if (binder == null) {
-                    return CommandResult(-1, "", "Shizuku binder unavailable")
-                }
+                val binder = Shizuku.getBinder() ?: return CommandResult(
+                    -1,
+                    "",
+                    "Shizuku binder unavailable"
+                )
 
                 val stubClass = Class.forName($$"moe.shizuku.server.IShizukuService$Stub")
                 val asInterface = stubClass.getMethod("asInterface", android.os.IBinder::class.java)

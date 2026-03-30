@@ -2,7 +2,6 @@ package com.agentkosticka.easierspot.ui.client
 
 import android.Manifest
 import android.bluetooth.BluetoothAdapter
-import android.bluetooth.BluetoothManager
 import android.content.BroadcastReceiver
 import android.content.Intent
 import android.content.IntentFilter
@@ -65,7 +64,7 @@ class ClientActivity : AppCompatActivity() {
     private var addNetworkStabilityCredentials: HotspotCredentials? = null
     private var addNetworkFlowStartTime: Long = 0L
     private var addNetworkRetryCount = 0
-    private val MAX_ADD_NETWORK_RETRIES = 1
+    private val maxAddNetworkRetries = 1
     private val enableBluetoothLauncher =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
             if (result.resultCode == RESULT_OK) {
@@ -334,56 +333,28 @@ class ClientActivity : AppCompatActivity() {
             return
         }
 
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
-            Log.d(TAG, "connectToHotspot: SDK < Q, using legacy manual connection path")
-            prepareFastWifiHandoff(credentials)
-            Toast.makeText(
-                this,
-                "Please connect manually in Wi-Fi settings: ${credentials.ssid}",
-                Toast.LENGTH_LONG
-            ).show()
-            startActivity(Intent(android.provider.Settings.ACTION_WIFI_SETTINGS))
-            return
-        }
-
         if (!hasRequiredPermissions()) {
             Log.w(TAG, "connectToHotspot: Missing required permissions")
             Toast.makeText(this, "Missing permissions to request Wi-Fi connection", Toast.LENGTH_LONG).show()
             return
         }
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            Log.d(TAG, "connectToHotspot: SDK >= R, using add-network path for ${credentials.ssid}")
-            prepareWifiHandoffForAddNetworks(credentials)
-            val addNetworksStarted = connectToHotspotViaAddNetworks(credentials)
-            if (addNetworksStarted) {
-                return
-            }
-
-            prepareFastWifiHandoff(credentials)
-            val suggestionStarted = connectToHotspotViaSuggestion(credentials)
-            if (suggestionStarted) {
-                showConnectionStatus("Add-network unavailable. Using suggestion for ${credentials.ssid}...")
-                return
-            }
-
-            showTemporaryConnectionFallbackDialog(credentials)
+        Log.d(TAG, "connectToHotspot: SDK >= R, using add-network path for ${credentials.ssid}")
+        prepareWifiHandoffForAddNetworks(credentials)
+        val addNetworksStarted = connectToHotspotViaAddNetworks(credentials)
+        if (addNetworksStarted) {
             return
         }
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            Log.d(TAG, "connectToHotspot: SDK >= Q but < R, using suggestion path for ${credentials.ssid}")
-            prepareFastWifiHandoff(credentials)
-            val started = connectToHotspotViaSuggestion(credentials)
-            if (started) {
-                return
-            }
-            Log.w(TAG, "connectToHotspot: Suggestion connection failed to start for ${credentials.ssid}")
-            showTemporaryConnectionFallbackDialog(credentials)
+        prepareFastWifiHandoff(credentials)
+        val suggestionStarted = connectToHotspotViaSuggestion(credentials)
+        if (suggestionStarted) {
+            showConnectionStatus("Add-network unavailable. Using suggestion for ${credentials.ssid}...")
             return
         }
 
-        connectToHotspotViaSpecifier(credentials)
+        showTemporaryConnectionFallbackDialog(credentials)
+        return
     }
 
     private fun connectToHotspotViaSuggestion(credentials: HotspotCredentials): Boolean {
@@ -556,8 +527,8 @@ class ClientActivity : AppCompatActivity() {
                                     Log.w(TAG, "StabilityGate: FAILED for ${credentials.ssid}; current SSID=$stableSsid")
                                     
                                     // Auto-retry on first-time disconnect (when SSID becomes unknown)
-                                    if (stableSsid == "<unknown ssid>" && addNetworkRetryCount < MAX_ADD_NETWORK_RETRIES) {
-                                        Log.w(TAG, "StabilityGate: First connection attempt failed with unknown SSID, retrying... (attempt ${addNetworkRetryCount + 1}/$MAX_ADD_NETWORK_RETRIES)")
+                                    if (stableSsid == "<unknown ssid>" && addNetworkRetryCount < maxAddNetworkRetries) {
+                                        Log.w(TAG, "StabilityGate: First connection attempt failed with unknown SSID, retrying... (attempt ${addNetworkRetryCount + 1}/$maxAddNetworkRetries)")
                                         addNetworkRetryCount++
                                         
                                         // Clear state for retry
@@ -572,7 +543,7 @@ class ClientActivity : AppCompatActivity() {
                                         }
                                     } else {
                                         // Either not unknown SSID or retry exhausted
-                                        if (addNetworkRetryCount >= MAX_ADD_NETWORK_RETRIES) {
+                                        if (addNetworkRetryCount >= maxAddNetworkRetries) {
                                             Log.w(TAG, "StabilityGate: Retry limit reached for ${credentials.ssid}")
                                         }
                                         runOnUiThread {

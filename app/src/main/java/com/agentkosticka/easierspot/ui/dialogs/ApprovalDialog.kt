@@ -63,8 +63,6 @@ class ApprovalDialog : DialogFragment() {
         val normalizedDeviceName = normalizeIdentityForDisplay(deviceName)
             .takeUnless { it == getString(R.string.approval_identity_unknown) }
         val joinTarget = nickname ?: normalizedDeviceName ?: normalizedDeviceId
-        val primaryIdentity = normalizedDeviceId
-        val secondaryIdentity: String? = null
 
         val view = LayoutInflater.from(requireContext()).inflate(R.layout.dialog_approval, null)
 
@@ -77,13 +75,10 @@ class ApprovalDialog : DialogFragment() {
         } else {
             getString(R.string.approval_title_existing_device, joinTarget)
         }
-        primaryIdentityTextView.text = getString(R.string.approval_identity_id_only, primaryIdentity)
-        if (secondaryIdentity != null) {
-            secondaryIdentityTextView.visibility = View.VISIBLE
-            secondaryIdentityTextView.text = secondaryIdentity
-        } else {
-            secondaryIdentityTextView.visibility = View.GONE
-        }
+        primaryIdentityTextView.text = getString(R.string.approval_identity_id_only,
+            normalizedDeviceId
+        )
+        secondaryIdentityTextView.visibility = View.GONE
 
         val dialog = AlertDialog.Builder(requireContext())
             .setView(view)

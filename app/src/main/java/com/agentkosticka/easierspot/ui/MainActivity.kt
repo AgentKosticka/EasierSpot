@@ -108,7 +108,7 @@ class MainActivity : AppCompatActivity() {
 
         if (missingRequired.isNotEmpty()) {
             Log.w(TAG, "Missing required permissions: $missingRequired")
-            val names = missingRequired.map { it.substringAfterLast('.') }.joinToString(", ")
+            val names = missingRequired.joinToString(", ") { it.substringAfterLast('.') }
             android.widget.Toast.makeText(
                 this,
                 "Missing required permissions: $names",

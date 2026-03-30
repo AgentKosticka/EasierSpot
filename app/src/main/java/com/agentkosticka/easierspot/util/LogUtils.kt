@@ -15,8 +15,7 @@ object LogUtils {
         DEBUG,
         INFO,
         WARN,
-        ERROR,
-        NONE
+        ERROR
     }
 
     /**

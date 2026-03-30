@@ -1,13 +1,12 @@
 package com.agentkosticka.easierspot.service
 
-import android.annotation.SuppressLint
 import android.Manifest
+import android.annotation.SuppressLint
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
-import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Binder
@@ -17,11 +16,11 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
+import androidx.core.content.edit
 import com.agentkosticka.easierspot.R
 import com.agentkosticka.easierspot.ble.server.BleAdvertiser
 import com.agentkosticka.easierspot.ble.server.GattServer
 import com.agentkosticka.easierspot.data.db.AppDatabase
-import com.agentkosticka.easierspot.data.model.HotspotCredentials
 import com.agentkosticka.easierspot.data.model.RememberedServer
 import com.agentkosticka.easierspot.hotspot.HotspotManager
 import com.agentkosticka.easierspot.ui.server.ServerActivity
@@ -305,10 +304,8 @@ class BleHotspotService : Service() {
         val fallbackName = "Client-${existing.deviceId}"
         val incomingName = clientName.takeUnless { it.isBlank() || it == "Unknown Device" }
         return existing.copy(
-            deviceName = if (existing.deviceName.isBlank()) {
+            deviceName = existing.deviceName.ifBlank {
                 incomingName ?: fallbackName
-            } else {
-                existing.deviceName
             },
             deviceAddress = clientAddress,
             lastSeen = approvedAt,
@@ -428,7 +425,7 @@ class BleHotspotService : Service() {
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .build()
         
-        val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        val notificationManager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
         notificationManager.notify(ENABLE_HOTSPOT_NOTIFICATION_ID, notification)
     }
 
@@ -524,7 +521,7 @@ class BleHotspotService : Service() {
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .build()
 
-        val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        val notificationManager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
         notificationManager.notify(APPROVAL_NOTIFICATION_ID, notification)
     }
 
@@ -550,31 +547,29 @@ class BleHotspotService : Service() {
     }
 
     private fun persistServerState(running: Boolean) {
-        getSharedPreferences(STATE_PREFS, Context.MODE_PRIVATE)
-            .edit()
-            .putBoolean(KEY_RUNNING, running)
-            .apply()
+        getSharedPreferences(STATE_PREFS, MODE_PRIVATE)
+            .edit {
+                putBoolean(KEY_RUNNING, running)
+            }
     }
 
     private fun createNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val serviceChannel = NotificationChannel(
-                SERVICE_CHANNEL_ID,
-                "BLE Hotspot Service",
-                NotificationManager.IMPORTANCE_LOW
-            )
-            serviceChannel.description = "Running BLE hotspot sharing"
+        val serviceChannel = NotificationChannel(
+            SERVICE_CHANNEL_ID,
+            "BLE Hotspot Service",
+            NotificationManager.IMPORTANCE_LOW
+        )
+        serviceChannel.description = "Running BLE hotspot sharing"
 
-            val alertsChannel = NotificationChannel(
-                ALERTS_CHANNEL_ID,
-                "Hotspot approvals and prompts",
-                NotificationManager.IMPORTANCE_HIGH
-            )
-            alertsChannel.description = "Approval and hotspot enable prompts"
+        val alertsChannel = NotificationChannel(
+            ALERTS_CHANNEL_ID,
+            "Hotspot approvals and prompts",
+            NotificationManager.IMPORTANCE_HIGH
+        )
+        alertsChannel.description = "Approval and hotspot enable prompts"
 
-            val manager = getSystemService(NotificationManager::class.java)
-            manager?.createNotificationChannels(listOf(serviceChannel, alertsChannel))
-        }
+        val manager = getSystemService(NotificationManager::class.java)
+        manager?.createNotificationChannels(listOf(serviceChannel, alertsChannel))
     }
 
     private fun createNotification(): Notification {

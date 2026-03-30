@@ -17,12 +17,12 @@ import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.core.content.edit
 import androidx.lifecycle.lifecycleScope
 import com.agentkosticka.easierspot.R
 import com.agentkosticka.easierspot.data.db.AppDatabase
 import com.agentkosticka.easierspot.data.model.RememberedServer
 import com.agentkosticka.easierspot.service.BleHotspotService
-import com.agentkosticka.easierspot.ui.diagnostics.DiagnosticsActivity
 import com.agentkosticka.easierspot.ui.dialogs.ApprovalDialog
 import com.agentkosticka.easierspot.ui.dialogs.RememberedDeviceDialog
 import com.agentkosticka.easierspot.ui.settings.SettingsActivity
@@ -51,7 +51,7 @@ class ServerActivity : AppCompatActivity(), ApprovalDialog.ApprovalListener, Rem
             }
         }
     private val approvalReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: android.content.Context?, intent: Intent?) {
+        override fun onReceive(context: Context?, intent: Intent?) {
             if (intent?.action == BleHotspotService.ACTION_SHOW_APPROVAL) {
                 showPendingApprovalIfPresent(intent)
             }
@@ -139,7 +139,7 @@ class ServerActivity : AppCompatActivity(), ApprovalDialog.ApprovalListener, Rem
                         .replace(Regex("^(?i)(client-)+"), "")
                         .ifBlank { server.deviceId }
                     val nickname = server.nickname?.trim().orEmpty()
-                    val title = if (nickname.isNotEmpty()) nickname else canonicalId
+                    val title = nickname.ifEmpty { canonicalId }
                     val lastApprovedText = if (server.lastApprovedAt > 0L) {
                         val secondsAgo = ((now - server.lastApprovedAt).coerceAtLeast(0L)) / 1000
                         getString(R.string.remembered_last_approved_seconds_ago, secondsAgo)
@@ -308,14 +308,14 @@ class ServerActivity : AppCompatActivity(), ApprovalDialog.ApprovalListener, Rem
     }
 
     private fun persistServerState(running: Boolean) {
-        getSharedPreferences(STATE_PREFS, Context.MODE_PRIVATE)
-            .edit()
-            .putBoolean(KEY_RUNNING, running)
-            .apply()
+        getSharedPreferences(STATE_PREFS, MODE_PRIVATE)
+            .edit {
+                putBoolean(KEY_RUNNING, running)
+            }
     }
 
     private fun readPersistedServerState(): Boolean {
-        return getSharedPreferences(STATE_PREFS, Context.MODE_PRIVATE)
+        return getSharedPreferences(STATE_PREFS, MODE_PRIVATE)
             .getBoolean(KEY_RUNNING, false)
     }
 

@@ -2,7 +2,6 @@ package com.agentkosticka.easierspot.ble.server
 
 import android.Manifest
 import android.annotation.SuppressLint
-import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothGatt
 import android.bluetooth.BluetoothGattCharacteristic
 import android.bluetooth.BluetoothGattDescriptor
@@ -40,16 +39,12 @@ class GattServer(private val context: Context, private val deviceId: String) {
     private var gattServer: BluetoothGattServer? = null
 
     private val _connectedClients = MutableStateFlow<List<ClientConnection>>(emptyList())
-    val connectedClients: StateFlow<List<ClientConnection>> = _connectedClients.asStateFlow()
 
     private val _pendingApproval = MutableStateFlow<ClientConnection?>(null)
-    val pendingApproval: StateFlow<ClientConnection?> = _pendingApproval.asStateFlow()
 
     private val _gattServerError = MutableStateFlow<String?>(null)
-    val gattServerError: StateFlow<String?> = _gattServerError.asStateFlow()
 
     private val _isRunning = MutableStateFlow(false)
-    val isRunning: StateFlow<Boolean> = _isRunning.asStateFlow()
 
     private val approvedClients = mutableSetOf<String>()
     private val clientStableIds = mutableMapOf<String, String>()
@@ -229,7 +224,7 @@ class GattServer(private val context: Context, private val deviceId: String) {
                 BluetoothProfile.STATE_CONNECTED -> {
                     LogUtils.i(TAG, "Client connected: ${device.address}")
                     val client = ClientConnection(device.address)
-                    _connectedClients.value = _connectedClients.value + client
+                    _connectedClients.value += client
 
                     // Wait for client stable ID write before evaluating approval.
                     if (device.address !in approvedClients) {
