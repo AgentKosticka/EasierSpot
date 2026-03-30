@@ -45,4 +45,11 @@
     <string name="approval_action_deny">Deny</string>
     <string name="approval_action_approve">Approve</string>
     <string name="remembered_devices">Remembered Devices</string>
+    <string name="easier_spot">Easier Spot</string>
+    <string name="select_mode">Select Mode</string>
+    <string name="connect_to_hotspot_client">Connect to Hotspot (Client)</string>
+    <string name="share_hotspot_server">Share Hotspot (Server)</string>
+    <string name="start_sharing">Start Sharing</string>
+    <string name="share_your_hotspot">Share Your Hotspot</string>
+    <string name="stop_sharing">Stop Sharing</string>
 </resources>
