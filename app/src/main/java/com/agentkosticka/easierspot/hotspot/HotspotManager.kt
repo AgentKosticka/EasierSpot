@@ -1,5 +1,6 @@
 package com.agentkosticka.easierspot.hotspot
 
+import android.annotation.SuppressLint
 import android.content.Intent
 import android.content.Context
 import android.content.pm.PackageManager
@@ -757,7 +758,7 @@ class HotspotManager(private val context: Context) {
 
     private fun createTetheringRequestParcel(): Any? {
         return runCatching {
-            val builderClass = Class.forName("android.net.TetheringManager\$TetheringRequest\$Builder")
+            val builderClass = Class.forName($$"android.net.TetheringManager$TetheringRequest$Builder")
             val ctor = builderClass.getDeclaredConstructor(Int::class.javaPrimitiveType)
             ctor.isAccessible = true
             val builder = ctor.newInstance(TETHERING_TYPE_WIFI)
@@ -825,6 +826,7 @@ class HotspotManager(private val context: Context) {
         )
     }
 
+    @SuppressLint("PrivateApi")
     private fun getTetheringConnector(): Any? {
         return try {
             val tetheringBinder = SystemServiceHelper.getSystemService("tethering")
@@ -833,7 +835,7 @@ class HotspotManager(private val context: Context) {
                 return null
             }
             val wrappedBinder = ShizukuBinderWrapper(tetheringBinder)
-            val stubClass = Class.forName("android.net.ITetheringConnector\$Stub")
+            val stubClass = Class.forName($$"android.net.ITetheringConnector$Stub")
             val asInterface = stubClass.getMethod("asInterface", android.os.IBinder::class.java)
             asInterface.invoke(null, wrappedBinder)
         } catch (e: Exception) {
@@ -863,7 +865,7 @@ class HotspotManager(private val context: Context) {
                     return CommandResult(-1, "", "Shizuku binder unavailable")
                 }
 
-                val stubClass = Class.forName("moe.shizuku.server.IShizukuService\$Stub")
+                val stubClass = Class.forName($$"moe.shizuku.server.IShizukuService$Stub")
                 val asInterface = stubClass.getMethod("asInterface", android.os.IBinder::class.java)
                 val service = asInterface.invoke(null, binder)
                     ?: return CommandResult(-1, "", "IShizukuService unavailable")

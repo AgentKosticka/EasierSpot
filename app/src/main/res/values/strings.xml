@@ -44,4 +44,5 @@
     <string name="approval_identity_id_line">ID: %1$s</string>
     <string name="approval_action_deny">Deny</string>
     <string name="approval_action_approve">Approve</string>
+    <string name="remembered_devices">Remembered Devices</string>
 </resources>
