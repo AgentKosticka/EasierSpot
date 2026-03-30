@@ -7,7 +7,7 @@ Easier Spot is an Android application that simplifies Wi-Fi hotspot sharing betw
 Allows you to share your hotspot with your other devices and/or other people. Think apple continuity or Samsungs "Connect to device" but for anyone using two android devices.
 
 ## Getting the app
-- You can download prebuilt `.apk` files in the releases section
+- You can download prebuilt `.apk` files in the [releases section](https://github.com/AgentKosticka/EasierSpot/releases)
 - Alternatively you can [build from source](#build-instructions)
 
 ### Requirements
