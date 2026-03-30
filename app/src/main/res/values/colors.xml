@@ -12,4 +12,6 @@
     <color name="green_on_background">#102014</color>
     <color name="green_surface">#F6FFF6</color>
     <color name="green_on_surface">#102014</color>
+
+    <color name="ic_launcher_background">#66BB6A</color>
 </resources>
