@@ -7,12 +7,12 @@ import android.bluetooth.BluetoothGatt
 import android.bluetooth.BluetoothGattCallback
 import android.bluetooth.BluetoothGattCharacteristic
 import android.bluetooth.BluetoothGattDescriptor
-import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothProfile
 import android.content.Context
 import android.content.pm.PackageManager
 import android.util.Log
 import androidx.core.content.ContextCompat
+import androidx.core.content.edit
 import com.agentkosticka.easierspot.ble.BleConstants
 import com.agentkosticka.easierspot.data.model.HotspotCredentials
 import kotlinx.coroutines.CoroutineScope
@@ -26,7 +26,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import java.nio.charset.StandardCharsets
 import java.util.UUID
-import androidx.core.content.edit
 
 @SuppressLint("MissingPermission")
 class GattClient(private val context: Context) {

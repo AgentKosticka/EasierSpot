@@ -138,6 +138,7 @@ class BleHotspotService : Service() {
                     stopSelf()
                 }
                 ACTION_APPROVE_CLIENT -> {
+                    dismissApprovalNotification()
                     val clientAddress = intent.getStringExtra(EXTRA_CLIENT_ADDRESS)
                     if (clientAddress != null) {
                         val clientDeviceId = intent.getStringExtra(EXTRA_CLIENT_DEVICE_ID) ?: "Unknown"
@@ -146,6 +147,7 @@ class BleHotspotService : Service() {
                     }
                 }
                 ACTION_DENY_CLIENT -> {
+                    dismissApprovalNotification()
                     val clientAddress = intent.getStringExtra(EXTRA_CLIENT_ADDRESS)
                     if (clientAddress != null) {
                         denyClient(clientAddress)
@@ -219,6 +221,7 @@ class BleHotspotService : Service() {
         gattServer = null
         isServerRunning = false
         persistServerState(false)
+        dismissApprovalNotification()
     }
 
     private fun checkAndRequestApproval(clientAddress: String, clientStableId: String?) {
@@ -519,6 +522,11 @@ class BleHotspotService : Service() {
 
         val notificationManager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
         notificationManager.notify(APPROVAL_NOTIFICATION_ID, notification)
+    }
+
+    private fun dismissApprovalNotification() {
+        val notificationManager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+        notificationManager.cancel(APPROVAL_NOTIFICATION_ID)
     }
 
     override fun onDestroy() {
