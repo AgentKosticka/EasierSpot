@@ -24,9 +24,9 @@
     <string name="remembered_meta_with_id">ID: %1$s • %2$s</string>
     <string name="remembered_meta_with_id_policy">ID: %1$s • Policy: %2$s • %3$s</string>
     <string name="remembered_meta_with_policy">Policy: %1$s • %2$s</string>
-    <string name="approval_policy_approved">Approved</string>
+    <string name="approval_policy_approved">Approve</string>
     <string name="approval_policy_ask">Ask</string>
-    <string name="approval_policy_denied">Denied</string>
+    <string name="approval_policy_denied">Deny</string>
     <string name="remembered_device_dialog_title">Manage %1$s</string>
     <string name="remembered_device_nickname_label">Nickname</string>
     <string name="remembered_device_nickname_hint">Optional nickname</string>
