@@ -11,6 +11,7 @@ import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import com.agentkosticka.easierspot.R
 import com.agentkosticka.easierspot.ui.client.ClientActivity
+import com.agentkosticka.easierspot.ui.settings.SettingsActivity
 import com.agentkosticka.easierspot.ui.server.ServerActivity
 
 class MainActivity : AppCompatActivity() {
@@ -40,6 +41,7 @@ class MainActivity : AppCompatActivity() {
 
         val clientModeButton = findViewById<android.widget.Button>(R.id.btn_client_mode)
         val serverModeButton = findViewById<android.widget.Button>(R.id.btn_server_mode)
+        val settingsButton = findViewById<android.widget.ImageButton>(R.id.btn_settings)
 
         clientModeButton.setOnClickListener {
             startActivity(Intent(this, ClientActivity::class.java))
@@ -47,6 +49,10 @@ class MainActivity : AppCompatActivity() {
 
         serverModeButton.setOnClickListener {
             startActivity(Intent(this, ServerActivity::class.java))
+        }
+
+        settingsButton.setOnClickListener {
+            startActivity(Intent(this, SettingsActivity::class.java))
         }
     }
 

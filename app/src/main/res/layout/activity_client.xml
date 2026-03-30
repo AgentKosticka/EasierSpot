@@ -3,7 +3,23 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
-    android:padding="16dp">
+    android:padding="16dp"
+    android:fitsSystemWindows="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="end"
+        android:layout_marginBottom="8dp">
+
+        <ImageButton
+            android:id="@+id/btn_client_settings"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="@string/action_settings"
+            android:src="@android:drawable/ic_menu_manage" />
+    </LinearLayout>
 
     <Button
         android:id="@+id/btn_scan"
@@ -12,18 +28,6 @@
         android:text="Start Scan"
         android:layout_marginBottom="16dp"
         android:padding="12dp" />
-
-    <TextView
-        android:id="@+id/status_text"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text=""
-        android:textSize="16sp"
-        android:textStyle="bold"
-        android:textColor="@android:color/holo_blue_dark"
-        android:gravity="center"
-        android:padding="8dp"
-        android:visibility="gone" />
 
     <ListView
         android:id="@+id/devices_list"

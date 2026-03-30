@@ -3,7 +3,32 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
-    android:padding="16dp">
+    android:padding="16dp"
+    android:fitsSystemWindows="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="end"
+        android:layout_marginBottom="8dp">
+
+        <ImageButton
+            android:id="@+id/btn_server_settings"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="@string/action_settings"
+            android:src="@android:drawable/ic_menu_manage"
+            android:layout_marginEnd="4dp" />
+
+        <ImageButton
+            android:id="@+id/btn_server_diagnostics"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="@string/action_diagnostics"
+            android:src="@android:drawable/ic_menu_info_details" />
+    </LinearLayout>
 
     <TextView
         android:layout_width="match_parent"
@@ -28,31 +53,6 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:text="Stop Sharing"
-        android:padding="16dp"
-        android:textSize="16sp" />
-
-    <View
-        android:layout_width="match_parent"
-        android:layout_height="1dp"
-        android:background="#CCCCCC"
-        android:layout_marginTop="32dp"
-        android:layout_marginBottom="16dp" />
-
-    <TextView
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="Diagnostics"
-        android:textSize="18sp"
-        android:textStyle="bold"
-        android:gravity="center"
-        android:layout_marginBottom="16dp" />
-
-    <Button
-        android:id="@+id/btn_test_hotspot"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="Test Hotspot Config"
-        android:layout_marginBottom="16dp"
         android:padding="16dp"
         android:textSize="16sp" />
 

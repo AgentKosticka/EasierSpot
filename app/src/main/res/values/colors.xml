@@ -2,4 +2,14 @@
 <resources>
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
+    <color name="green_primary">#2E7D32</color>
+    <color name="green_on_primary">#FFFFFFFF</color>
+    <color name="green_primary_container">#C8E6C9</color>
+    <color name="green_on_primary_container">#1B5E20</color>
+    <color name="green_secondary">#66BB6A</color>
+    <color name="green_on_secondary">#0B2E13</color>
+    <color name="green_background">#F3FBF3</color>
+    <color name="green_on_background">#102014</color>
+    <color name="green_surface">#F6FFF6</color>
+    <color name="green_on_surface">#102014</color>
 </resources>

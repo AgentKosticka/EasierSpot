@@ -9,6 +9,7 @@ import android.content.IntentFilter
 import android.os.Build
 import android.os.Bundle
 import android.widget.Button
+import android.widget.ImageButton
 import android.widget.ListView
 import android.widget.SimpleAdapter
 import android.widget.Toast
@@ -16,10 +17,10 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import com.agentkosticka.easierspot.R
 import com.agentkosticka.easierspot.data.db.AppDatabase
-import com.agentkosticka.easierspot.hotspot.HotspotManager
 import com.agentkosticka.easierspot.service.BleHotspotService
+import com.agentkosticka.easierspot.ui.diagnostics.DiagnosticsActivity
 import com.agentkosticka.easierspot.ui.dialogs.ApprovalDialog
-import com.agentkosticka.easierspot.ui.dialogs.HotspotTestDialog
+import com.agentkosticka.easierspot.ui.settings.SettingsActivity
 import com.agentkosticka.easierspot.util.LogUtils
 import kotlinx.coroutines.launch
 import java.util.UUID
@@ -29,13 +30,11 @@ class ServerActivity : AppCompatActivity(), ApprovalDialog.ApprovalListener {
         private const val TAG = "ServerActivity"
         private const val REQUEST_ENABLE_BT = 1001
         private const val APPROVAL_DIALOG_TAG = "approval_dialog"
-        private const val TEST_DIALOG_TAG = "test_dialog"
         private const val STATE_PREFS = "server_service_state"
         private const val KEY_RUNNING = "running"
     }
     
     private val deviceId = UUID.randomUUID().toString().take(4)
-    private val hotspotManager by lazy { HotspotManager(this) }
     private val database by lazy { AppDatabase.getDatabase(this) }
     private val rememberedDeviceRows = mutableListOf<Map<String, String>>()
     private var rememberedAdapter: SimpleAdapter? = null
@@ -57,7 +56,8 @@ class ServerActivity : AppCompatActivity(), ApprovalDialog.ApprovalListener {
 
             val startButton = findViewById<Button>(R.id.btn_start_sharing)
             val stopButton = findViewById<Button>(R.id.btn_stop_sharing)
-            val testButton = findViewById<Button>(R.id.btn_test_hotspot)
+            val settingsButton = findViewById<ImageButton>(R.id.btn_server_settings)
+            val diagnosticsButton = findViewById<ImageButton>(R.id.btn_server_diagnostics)
             val rememberedList = findViewById<ListView>(R.id.list_remembered_devices)
 
             rememberedAdapter = SimpleAdapter(
@@ -98,8 +98,12 @@ class ServerActivity : AppCompatActivity(), ApprovalDialog.ApprovalListener {
                 }
             }
 
-            testButton.setOnClickListener {
-                runHotspotTest()
+            settingsButton.setOnClickListener {
+                startActivity(Intent(this, SettingsActivity::class.java))
+            }
+
+            diagnosticsButton.setOnClickListener {
+                startActivity(Intent(this, DiagnosticsActivity::class.java))
             }
 
             stopButton.isEnabled = false
@@ -205,20 +209,6 @@ class ServerActivity : AppCompatActivity(), ApprovalDialog.ApprovalListener {
             LogUtils.e(TAG, "Error in startSharing", e)
             Toast.makeText(this, "Error: ${e.message}", Toast.LENGTH_LONG).show()
         }
-    }
-
-    private fun runHotspotTest() {
-        ShizukuHelper.requestShizukuPermission(
-            this,
-            onGranted = {
-                val diagnostics = hotspotManager.getHotspotDiagnostics()
-                HotspotTestDialog.newInstance(diagnostics)
-                    .show(supportFragmentManager, TEST_DIALOG_TAG)
-            },
-            onDenied = {
-                Toast.makeText(this, "Shizuku permission required for testing", Toast.LENGTH_LONG).show()
-            }
-        )
     }
 
     private fun stopSharing() {

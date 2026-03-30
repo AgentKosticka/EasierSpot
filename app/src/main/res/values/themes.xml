@@ -1,8 +1,17 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
     <!-- Base application theme. -->
     <style name="Base.Theme.EasierSpot" parent="Theme.Material3.DayNight.NoActionBar">
-        <!-- Customize your light theme here. -->
-        <!-- <item name="colorPrimary">@color/my_light_primary</item> -->
+        <item name="colorPrimary">@color/green_primary</item>
+        <item name="colorOnPrimary">@color/green_on_primary</item>
+        <item name="colorPrimaryContainer">@color/green_primary_container</item>
+        <item name="colorOnPrimaryContainer">@color/green_on_primary_container</item>
+        <item name="colorSecondary">@color/green_secondary</item>
+        <item name="colorOnSecondary">@color/green_on_secondary</item>
+        <item name="android:colorBackground">@color/green_background</item>
+        <item name="colorSurface">@color/green_surface</item>
+        <item name="colorOnSurface">@color/green_on_surface</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">true</item>
     </style>
 
     <style name="Theme.EasierSpot" parent="Base.Theme.EasierSpot" />

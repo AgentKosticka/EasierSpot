@@ -61,6 +61,14 @@
         <activity
             android:name=".ui.server.ServerActivity"
             android:exported="false" />
+
+        <activity
+            android:name=".ui.settings.SettingsActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".ui.diagnostics.DiagnosticsActivity"
+            android:exported="false" />
         
         <service
             android:name=".service.BleHotspotService"

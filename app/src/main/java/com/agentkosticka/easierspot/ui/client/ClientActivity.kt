@@ -31,6 +31,7 @@ import com.agentkosticka.easierspot.R
 import com.agentkosticka.easierspot.ble.client.BleScanner
 import com.agentkosticka.easierspot.ble.client.GattClient
 import com.agentkosticka.easierspot.data.model.HotspotCredentials
+import com.agentkosticka.easierspot.ui.settings.SettingsActivity
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -48,7 +49,8 @@ class ClientActivity : AppCompatActivity() {
     private var adapter: SimpleAdapter? = null
     private val deviceList = mutableListOf<Map<String, String>>()
     private lateinit var scanButton: Button
-    private lateinit var statusText: android.widget.TextView
+    private var connectionStatusDialog: AlertDialog? = null
+    private var connectionStatusTextView: android.widget.TextView? = null
     private var hotspotNetworkCallback: ConnectivityManager.NetworkCallback? = null
     private var suggestionNetworkCallback: ConnectivityManager.NetworkCallback? = null
     private var suggestionFallbackJob: Job? = null
@@ -69,8 +71,11 @@ class ClientActivity : AppCompatActivity() {
         gattClient = GattClient(this)
 
         scanButton = findViewById(R.id.btn_scan)
-        statusText = findViewById(R.id.status_text)
+        val settingsButton = findViewById<android.widget.ImageButton>(R.id.btn_client_settings)
         val devicesListView = findViewById<ListView>(R.id.devices_list)
+        settingsButton.setOnClickListener {
+            startActivity(Intent(this, SettingsActivity::class.java))
+        }
 
         adapter = SimpleAdapter(
             this,
@@ -127,23 +132,21 @@ class ClientActivity : AppCompatActivity() {
                 Log.d(TAG, "Connection state: $state")
                 when (state) {
                     GattClient.ConnectionState.CONNECTING -> {
-                        statusText.text = "Connecting..."
-                        statusText.visibility = android.view.View.VISIBLE
+                        showConnectionStatus("Connecting...")
                     }
                     GattClient.ConnectionState.CONNECTED -> {
-                        statusText.text = "Connected, waiting for approval..."
-                        statusText.visibility = android.view.View.VISIBLE
+                        showConnectionStatus("Connected, waiting for approval...")
                     }
                     GattClient.ConnectionState.DISCONNECTED -> {
                         if (isConnecting) {
-                            statusText.text = "Disconnected"
+                            showConnectionStatus("Disconnected")
                             isConnecting = false
                         } else {
-                            statusText.visibility = android.view.View.GONE
+                            dismissConnectionStatus()
                         }
                     }
                     GattClient.ConnectionState.ERROR -> {
-                        statusText.text = "Connection error"
+                        showConnectionStatus("Connection error")
                         isConnecting = false
                     }
                 }
@@ -156,10 +159,10 @@ class ClientActivity : AppCompatActivity() {
                 Log.d(TAG, "Approval status: $status")
                 when (status) {
                     GattClient.ApprovalStatus.APPROVED -> {
-                        statusText.text = "Approved! Receiving credentials..."
+                        showConnectionStatus("Approved! Receiving credentials...")
                     }
                     GattClient.ApprovalStatus.DENIED -> {
-                        statusText.text = "Connection denied by server"
+                        showConnectionStatus("Connection denied by server")
                         isConnecting = false
                     }
                     null -> { /* Pending or unknown */ }
@@ -172,7 +175,7 @@ class ClientActivity : AppCompatActivity() {
             gattClient.receivedCredentials.collect { credentials ->
                 if (credentials != null) {
                     Log.d(TAG, "Received credentials: ${credentials.ssid}")
-                    statusText.text = "Got credentials! Preparing fast Wi-Fi handoff..."
+                    showConnectionStatus("Got credentials! Preparing fast Wi-Fi handoff...")
                     isConnecting = false
                     gattClient.disconnect()
                     delay(300)
@@ -250,8 +253,7 @@ class ClientActivity : AppCompatActivity() {
             }
 
             if (resultCode != RESULT_OK) {
-                statusText.text = "Wi-Fi add/connect cancelled. You can retry or use temporary mode."
-                statusText.visibility = android.view.View.VISIBLE
+                showConnectionStatus("Wi-Fi add/connect cancelled. You can retry or use temporary mode.")
                 showTemporaryConnectionFallbackDialog(credentials)
                 return
             }
@@ -260,8 +262,7 @@ class ClientActivity : AppCompatActivity() {
             val resultList = data?.getIntArrayExtra(Settings.EXTRA_WIFI_NETWORK_RESULT_LIST)
             val allSucceeded = resultList?.all { it == ADD_WIFI_RESULT_SUCCESS } ?: true
             if (!allSucceeded) {
-                statusText.text = "System could not add/connect this network reliably."
-                statusText.visibility = android.view.View.VISIBLE
+                showConnectionStatus("System could not add/connect this network reliably.")
                 val suggestionStarted = connectToHotspotViaSuggestion(credentials)
                 if (!suggestionStarted) {
                     showTemporaryConnectionFallbackDialog(credentials)
@@ -269,8 +270,7 @@ class ClientActivity : AppCompatActivity() {
                 return
             }
 
-            statusText.text = "System accepted ${credentials.ssid}. Waiting for connection..."
-            statusText.visibility = android.view.View.VISIBLE
+            showConnectionStatus("System accepted ${credentials.ssid}. Waiting for connection...")
             monitorSuggestionConnection(credentials)
         }
     }
@@ -278,8 +278,7 @@ class ClientActivity : AppCompatActivity() {
     private fun connectToServer(server: com.agentkosticka.easierspot.ble.client.DiscoveredServer) {
         Log.d(TAG, "Connecting to ${server.deviceName} (${server.deviceId})")
         isConnecting = true
-        statusText.text = "Connecting to ${server.deviceName}..."
-        statusText.visibility = android.view.View.VISIBLE
+        showConnectionStatus("Connecting to ${server.deviceName}...")
         gattClient.connect(server.bluetoothDevice)
         bleScanner.stopScan()
         scanButton.text = "Start Scan"
@@ -323,8 +322,7 @@ class ClientActivity : AppCompatActivity() {
 
             val suggestionStarted = connectToHotspotViaSuggestion(credentials)
             if (suggestionStarted) {
-                statusText.text = "Add-network unavailable. Using suggestion for ${credentials.ssid}..."
-                statusText.visibility = android.view.View.VISIBLE
+                showConnectionStatus("Add-network unavailable. Using suggestion for ${credentials.ssid}...")
                 return
             }
 
@@ -358,14 +356,12 @@ class ClientActivity : AppCompatActivity() {
 
         if (finalStatus != WifiManager.STATUS_NETWORK_SUGGESTIONS_SUCCESS) {
             Log.w(TAG, "WifiNetworkSuggestion failed with status=$finalStatus")
-            statusText.text = "System Wi-Fi suggestion failed (status=$finalStatus)"
-            statusText.visibility = android.view.View.VISIBLE
+            showConnectionStatus("System Wi-Fi suggestion failed (status=$finalStatus)")
             return false
         }
 
         pendingSuggestionCredentials = credentials
-        statusText.text = "Waiting for Android to connect to ${credentials.ssid}..."
-        statusText.visibility = android.view.View.VISIBLE
+        showConnectionStatus("Waiting for Android to connect to ${credentials.ssid}...")
 
         monitorSuggestionConnection(credentials)
 
@@ -374,7 +370,7 @@ class ClientActivity : AppCompatActivity() {
             delay(25000)
             if (pendingSuggestionCredentials == credentials) {
                 Log.w(TAG, "Suggestion connection timed out; waiting for user fallback choice")
-                statusText.text = "Still waiting for system connection to ${credentials.ssid}"
+                showConnectionStatus("Still waiting for system connection to ${credentials.ssid}")
                 runOnUiThread {
                     showTemporaryConnectionFallbackDialog(credentials)
                 }
@@ -398,8 +394,7 @@ class ClientActivity : AppCompatActivity() {
         }
 
         pendingAddNetworksCredentials = credentials
-        statusText.text = "Confirm connection to ${credentials.ssid} in system dialog..."
-        statusText.visibility = android.view.View.VISIBLE
+        showConnectionStatus("Confirm connection to ${credentials.ssid} in system dialog...")
         startActivityForResult(intent, REQUEST_ADD_WIFI_NETWORKS)
         return true
     }
@@ -469,25 +464,26 @@ class ClientActivity : AppCompatActivity() {
                 suggestionFallbackJob?.cancel()
 
                 runOnUiThread {
-                    if (validated) {
-                        statusText.text = "Connected to ${credentials.ssid} (internet validated)"
+                    val message = if (validated) {
+                        "Connected to ${credentials.ssid} (internet validated)"
                     } else if (hasInternet) {
-                        statusText.text = "Connected to ${credentials.ssid} (internet pending validation)"
+                        "Connected to ${credentials.ssid} (internet pending validation)"
                     } else {
-                        statusText.text = "Connected to ${credentials.ssid}, but no upstream internet"
+                        "Connected to ${credentials.ssid}, but no upstream internet"
                     }
-                    Toast.makeText(this@ClientActivity, statusText.text, Toast.LENGTH_LONG).show()
+                    showConnectionStatus(message)
+                    dismissConnectionStatus()
+                    Toast.makeText(this@ClientActivity, message, Toast.LENGTH_LONG).show()
                 }
             }
 
             override fun onUnavailable() {
                 runOnUiThread {
                     if (pendingAddNetworksCredentials == credentials) {
-                        statusText.text = "Suggestion unavailable. Waiting for add-network flow..."
-                        statusText.visibility = android.view.View.VISIBLE
+                        showConnectionStatus("Suggestion unavailable. Waiting for add-network flow...")
                         return@runOnUiThread
                     }
-                    statusText.text = "System connection unavailable for ${credentials.ssid}"
+                    showConnectionStatus("System connection unavailable for ${credentials.ssid}")
                     showTemporaryConnectionFallbackDialog(credentials)
                 }
             }
@@ -564,7 +560,7 @@ class ClientActivity : AppCompatActivity() {
                     "You can try a temporary app-scoped connection now (may not provide full-device internet)."
             )
             .setPositiveButton("Try Temporary") { _: DialogInterface, _: Int ->
-                statusText.text = "Trying temporary app connection..."
+                showConnectionStatus("Trying temporary app connection...")
                 connectToHotspotViaSpecifier(credentials)
             }
             .setNegativeButton("Keep Waiting", null)
@@ -578,8 +574,7 @@ class ClientActivity : AppCompatActivity() {
         }
 
         pendingCredentials = credentials
-        statusText.text = "Please enable Wi-Fi to continue"
-        statusText.visibility = android.view.View.VISIBLE
+        showConnectionStatus("Please enable Wi-Fi to continue")
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             Toast.makeText(this, "Wi-Fi is off. Please enable it and return.", Toast.LENGTH_LONG).show()
@@ -599,6 +594,7 @@ class ClientActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        dismissConnectionStatus()
         super.onDestroy()
         Log.d(TAG, "onDestroy()")
         suggestionFallbackJob?.cancel()
@@ -643,5 +639,34 @@ class ClientActivity : AppCompatActivity() {
         }
         suggestionPostConnectReceiver = receiver
         registerReceiver(receiver, IntentFilter(WifiManager.ACTION_WIFI_NETWORK_SUGGESTION_POST_CONNECTION))
+    }
+
+    private fun showConnectionStatus(message: String) {
+        val dialog = connectionStatusDialog
+        if (dialog == null || !dialog.isShowing) {
+            val textView = android.widget.TextView(this).apply {
+                text = message
+                textSize = 16f
+                setPadding(48, 32, 48, 16)
+            }
+            connectionStatusTextView = textView
+            connectionStatusDialog = AlertDialog.Builder(this)
+                .setTitle(getString(R.string.connection_status_title))
+                .setView(textView)
+                .setNegativeButton(getString(R.string.connection_cancel)) { _, _ ->
+                    gattClient.disconnect()
+                    isConnecting = false
+                }
+                .setCancelable(true)
+                .show()
+        } else {
+            connectionStatusTextView?.text = message
+        }
+    }
+
+    private fun dismissConnectionStatus() {
+        connectionStatusDialog?.dismiss()
+        connectionStatusDialog = null
+        connectionStatusTextView = null
     }
 }
