@@ -23,6 +23,7 @@ import android.widget.Button
 import android.widget.ListView
 import android.widget.SimpleAdapter
 import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
@@ -39,8 +40,6 @@ import kotlinx.coroutines.launch
 class ClientActivity : AppCompatActivity() {
     companion object {
         private const val TAG = "ClientActivity"
-        private const val REQUEST_ENABLE_BT = 1001
-        private const val REQUEST_ADD_WIFI_NETWORKS = 1002
         private const val ADD_WIFI_RESULT_SUCCESS = 0
     }
     
@@ -59,6 +58,20 @@ class ClientActivity : AppCompatActivity() {
     private var pendingCredentials: HotspotCredentials? = null
     private var pendingSuggestionCredentials: HotspotCredentials? = null
     private var pendingAddNetworksCredentials: HotspotCredentials? = null
+    private val enableBluetoothLauncher =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            if (result.resultCode == RESULT_OK) {
+                Log.d(TAG, "Bluetooth enabled by user")
+                Toast.makeText(this, "Bluetooth enabled! Tap scan again.", Toast.LENGTH_SHORT).show()
+            } else {
+                Log.w(TAG, "User declined to enable Bluetooth")
+                Toast.makeText(this, "Bluetooth is required for scanning", Toast.LENGTH_SHORT).show()
+            }
+        }
+    private val addWifiNetworksLauncher =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            handleAddWifiNetworksResult(result.resultCode, result.data)
+        }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -208,8 +221,16 @@ class ClientActivity : AppCompatActivity() {
         if (!bleScanner.isBluetoothEnabled()) {
             Log.d(TAG, "Bluetooth disabled, requesting enable")
             Toast.makeText(this, "Please enable Bluetooth", Toast.LENGTH_SHORT).show()
+            val hasConnectPermission = ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.BLUETOOTH_CONNECT
+            ) == PackageManager.PERMISSION_GRANTED
+            if (!hasConnectPermission) {
+                Toast.makeText(this, "Missing required permissions", Toast.LENGTH_SHORT).show()
+                return
+            }
             val enableBtIntent = Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE)
-            startActivityForResult(enableBtIntent, REQUEST_ENABLE_BT)
+            enableBluetoothLauncher.launch(enableBtIntent)
             return
         }
 
@@ -231,48 +252,33 @@ class ClientActivity : AppCompatActivity() {
         }
     }
 
-    @Deprecated("Deprecated in Java")
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode == REQUEST_ENABLE_BT) {
-            if (resultCode == RESULT_OK) {
-                Log.d(TAG, "Bluetooth enabled by user")
-                Toast.makeText(this, "Bluetooth enabled! Tap scan again.", Toast.LENGTH_SHORT).show()
-            } else {
-                Log.w(TAG, "User declined to enable Bluetooth")
-                Toast.makeText(this, "Bluetooth is required for scanning", Toast.LENGTH_SHORT).show()
+    private fun handleAddWifiNetworksResult(resultCode: Int, data: Intent?) {
+        val credentials = pendingAddNetworksCredentials
+        pendingAddNetworksCredentials = null
+        if (credentials == null) {
+            return
+        }
+
+        if (resultCode != RESULT_OK) {
+            showConnectionStatus("Wi-Fi add/connect cancelled. You can retry or use temporary mode.")
+            showTemporaryConnectionFallbackDialog(credentials)
+            return
+        }
+
+        @Suppress("DEPRECATION")
+        val resultList = data?.getIntArrayExtra(Settings.EXTRA_WIFI_NETWORK_RESULT_LIST)
+        val allSucceeded = resultList?.all { it == ADD_WIFI_RESULT_SUCCESS } ?: true
+        if (!allSucceeded) {
+            showConnectionStatus("System could not add/connect this network reliably.")
+            val suggestionStarted = connectToHotspotViaSuggestion(credentials)
+            if (!suggestionStarted) {
+                showTemporaryConnectionFallbackDialog(credentials)
             }
             return
         }
 
-        if (requestCode == REQUEST_ADD_WIFI_NETWORKS) {
-            val credentials = pendingAddNetworksCredentials
-            pendingAddNetworksCredentials = null
-            if (credentials == null) {
-                return
-            }
-
-            if (resultCode != RESULT_OK) {
-                showConnectionStatus("Wi-Fi add/connect cancelled. You can retry or use temporary mode.")
-                showTemporaryConnectionFallbackDialog(credentials)
-                return
-            }
-
-            @Suppress("DEPRECATION")
-            val resultList = data?.getIntArrayExtra(Settings.EXTRA_WIFI_NETWORK_RESULT_LIST)
-            val allSucceeded = resultList?.all { it == ADD_WIFI_RESULT_SUCCESS } ?: true
-            if (!allSucceeded) {
-                showConnectionStatus("System could not add/connect this network reliably.")
-                val suggestionStarted = connectToHotspotViaSuggestion(credentials)
-                if (!suggestionStarted) {
-                    showTemporaryConnectionFallbackDialog(credentials)
-                }
-                return
-            }
-
-            showConnectionStatus("System accepted ${credentials.ssid}. Waiting for connection...")
-            monitorSuggestionConnection(credentials)
-        }
+        showConnectionStatus("System accepted ${credentials.ssid}. Waiting for connection...")
+        monitorSuggestionConnection(credentials)
     }
 
     private fun connectToServer(server: com.agentkosticka.easierspot.ble.client.DiscoveredServer) {
@@ -395,7 +401,7 @@ class ClientActivity : AppCompatActivity() {
 
         pendingAddNetworksCredentials = credentials
         showConnectionStatus("Confirm connection to ${credentials.ssid} in system dialog...")
-        startActivityForResult(intent, REQUEST_ADD_WIFI_NETWORKS)
+        addWifiNetworksLauncher.launch(intent)
         return true
     }
 

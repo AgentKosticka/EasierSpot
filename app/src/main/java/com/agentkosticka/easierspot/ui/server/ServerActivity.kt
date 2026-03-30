@@ -6,6 +6,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.widget.Button
@@ -13,7 +14,9 @@ import android.widget.ImageButton
 import android.widget.ListView
 import android.widget.SimpleAdapter
 import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.agentkosticka.easierspot.R
 import com.agentkosticka.easierspot.data.db.AppDatabase
@@ -30,7 +33,6 @@ import java.util.UUID
 class ServerActivity : AppCompatActivity(), ApprovalDialog.ApprovalListener, RememberedDeviceDialog.RememberedDeviceListener {
     companion object {
         private const val TAG = "ServerActivity"
-        private const val REQUEST_ENABLE_BT = 1001
         private const val APPROVAL_DIALOG_TAG = "approval_dialog"
         private const val REMEMBERED_DIALOG_TAG = "remembered_dialog"
         private const val STATE_PREFS = "server_service_state"
@@ -42,6 +44,12 @@ class ServerActivity : AppCompatActivity(), ApprovalDialog.ApprovalListener, Rem
     private val rememberedDeviceRows = mutableListOf<Map<String, String>>()
     private var rememberedAdapter: SimpleAdapter? = null
     private var approvalReceiverRegistered = false
+    private val enableBluetoothLauncher =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            if (result.resultCode == RESULT_OK) {
+                Toast.makeText(this, "Bluetooth enabled. Tap Start Sharing again.", Toast.LENGTH_SHORT).show()
+            }
+        }
     private val approvalReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: android.content.Context?, intent: Intent?) {
             if (intent?.action == BleHotspotService.ACTION_SHOW_APPROVAL) {
@@ -228,8 +236,16 @@ class ServerActivity : AppCompatActivity(), ApprovalDialog.ApprovalListener, Rem
             
             if (!bluetoothAdapter.isEnabled) {
                 Toast.makeText(this, "Please enable Bluetooth first", Toast.LENGTH_LONG).show()
+                val hasConnectPermission = ContextCompat.checkSelfPermission(
+                    this,
+                    android.Manifest.permission.BLUETOOTH_CONNECT
+                ) == PackageManager.PERMISSION_GRANTED
+                if (!hasConnectPermission) {
+                    Toast.makeText(this, "Missing Bluetooth permission", Toast.LENGTH_LONG).show()
+                    return
+                }
                 val enableBtIntent = Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE)
-                startActivityForResult(enableBtIntent, REQUEST_ENABLE_BT)
+                enableBluetoothLauncher.launch(enableBtIntent)
                 return
             }
         } catch (e: Exception) {
@@ -380,16 +396,12 @@ class ServerActivity : AppCompatActivity(), ApprovalDialog.ApprovalListener, Rem
         super.onStart()
         syncServerUiState()
         if (!approvalReceiverRegistered) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                registerReceiver(
-                    approvalReceiver,
-                    IntentFilter(BleHotspotService.ACTION_SHOW_APPROVAL),
-                    RECEIVER_NOT_EXPORTED
-                )
-            } else {
-                @Suppress("DEPRECATION")
-                registerReceiver(approvalReceiver, IntentFilter(BleHotspotService.ACTION_SHOW_APPROVAL))
-            }
+            ContextCompat.registerReceiver(
+                this,
+                approvalReceiver,
+                IntentFilter(BleHotspotService.ACTION_SHOW_APPROVAL),
+                ContextCompat.RECEIVER_NOT_EXPORTED
+            )
             approvalReceiverRegistered = true
         }
     }

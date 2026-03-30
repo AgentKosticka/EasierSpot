@@ -15,22 +15,22 @@ abstract class AppDatabase : RoomDatabase() {
 
     companion object {
         private val MIGRATION_1_2 = object : Migration(1, 2) {
-            override fun migrate(database: SupportSQLiteDatabase) {
-                database.execSQL(
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
                     "ALTER TABLE remembered_servers ADD COLUMN deviceAddress TEXT NOT NULL DEFAULT ''"
                 )
             }
         }
 
         private val MIGRATION_2_3 = object : Migration(2, 3) {
-            override fun migrate(database: SupportSQLiteDatabase) {
-                database.execSQL(
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
                     "ALTER TABLE remembered_servers ADD COLUMN nickname TEXT"
                 )
-                database.execSQL(
+                db.execSQL(
                     "ALTER TABLE remembered_servers ADD COLUMN approvalPolicy TEXT NOT NULL DEFAULT '$APPROVAL_POLICY_APPROVED'"
                 )
-                database.execSQL(
+                db.execSQL(
                     "ALTER TABLE remembered_servers ADD COLUMN lastApprovedAt INTEGER NOT NULL DEFAULT 0"
                 )
             }

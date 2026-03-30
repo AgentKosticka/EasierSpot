@@ -579,11 +579,8 @@ class BleHotspotService : Service() {
 
     private fun createNotification(): Notification {
         val intent = Intent(this, ServerActivity::class.java)
-        val pendingIntent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_IMMUTABLE)
-        } else {
-            PendingIntent.getActivity(this, 0, intent, 0)
-        }
+        val pendingIntentFlags = PendingIntent.FLAG_IMMUTABLE
+        val pendingIntent = PendingIntent.getActivity(this, 0, intent, pendingIntentFlags)
 
         return NotificationCompat.Builder(this, SERVICE_CHANNEL_ID)
             .setContentTitle("EasierSpot")
