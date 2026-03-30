@@ -26,4 +26,13 @@ interface RememberedServerDao {
 
     @Query("SELECT * FROM remembered_servers WHERE deviceAddress = :deviceAddress LIMIT 1")
     suspend fun getServerByAddress(deviceAddress: String): RememberedServer?
+
+    @Query("UPDATE remembered_servers SET nickname = :nickname WHERE deviceId = :deviceId")
+    suspend fun updateNickname(deviceId: String, nickname: String?)
+
+    @Query("UPDATE remembered_servers SET approvalPolicy = :approvalPolicy WHERE deviceId = :deviceId")
+    suspend fun updateApprovalPolicy(deviceId: String, approvalPolicy: String)
+
+    @Query("UPDATE remembered_servers SET lastApprovedAt = :lastApprovedAt WHERE deviceId = :deviceId")
+    suspend fun updateLastApprovedAt(deviceId: String, lastApprovedAt: Long)
 }

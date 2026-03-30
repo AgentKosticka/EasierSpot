@@ -3,37 +3,81 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
-    android:padding="16dp"
     android:fitsSystemWindows="true">
 
     <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:gravity="end"
-        android:layout_marginBottom="8dp">
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:paddingTop="16dp"
+        android:paddingBottom="16dp"
+        android:paddingStart="@dimen/padding_horizontal_safe"
+        android:paddingEnd="@dimen/padding_horizontal_safe">
 
-        <ImageButton
-            android:id="@+id/btn_client_settings"
-            android:layout_width="36dp"
-            android:layout_height="36dp"
-            android:background="?attr/selectableItemBackgroundBorderless"
-            android:contentDescription="@string/action_settings"
-            android:src="@android:drawable/ic_menu_manage" />
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="end"
+            android:layout_marginBottom="12dp">
+
+            <ImageButton
+                android:id="@+id/btn_client_settings"
+                android:layout_width="36dp"
+                android:layout_height="36dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="@string/action_settings"
+                android:src="@android:drawable/ic_menu_manage" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/tv_client_heading"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/client_heading"
+            android:textAppearance="@android:style/TextAppearance.Material.Headline"
+            android:layout_marginBottom="8dp" />
+
+        <TextView
+            android:id="@+id/tv_client_subheading"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/client_subheading"
+            android:textAppearance="@android:style/TextAppearance.Material.Body1"
+            android:layout_marginBottom="20dp" />
+
+        <Button
+            android:id="@+id/btn_scan"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/client_scan_start"
+            android:layout_marginBottom="20dp"
+            android:padding="12dp" />
+
+        <TextView
+            android:id="@+id/tv_devices_title"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/client_devices_title"
+            android:textStyle="bold"
+            android:textAppearance="@android:style/TextAppearance.Material.Medium"
+            android:layout_marginBottom="6dp" />
+
+        <TextView
+            android:id="@+id/tv_devices_hint"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/client_devices_hint"
+            android:textAppearance="@android:style/TextAppearance.Material.Small"
+            android:layout_marginBottom="8dp" />
+
+        <ListView
+            android:id="@+id/devices_list"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:layout_marginTop="4dp"
+            android:divider="@android:color/darker_gray"
+            android:dividerHeight="0.5dp" />
     </LinearLayout>
-
-    <Button
-        android:id="@+id/btn_scan"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="Start Scan"
-        android:layout_marginBottom="16dp"
-        android:padding="12dp" />
-
-    <ListView
-        android:id="@+id/devices_list"
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1"
-        android:layout_marginTop="8dp" />
 
 </LinearLayout>

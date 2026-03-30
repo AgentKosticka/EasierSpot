@@ -3,21 +3,30 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
-    android:padding="16dp"
     android:fitsSystemWindows="true">
 
-    <TextView
+    <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="@string/title_diagnostics"
-        android:textStyle="bold"
-        android:textSize="22sp"
-        android:layout_marginBottom="16dp" />
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:paddingTop="16dp"
+        android:paddingBottom="16dp"
+        android:paddingStart="@dimen/padding_horizontal_safe"
+        android:paddingEnd="@dimen/padding_horizontal_safe">
 
-    <Button
-        android:id="@+id/btn_run_hotspot_diagnostics"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="@string/diagnostics_run_hotspot_test" />
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/title_diagnostics"
+            android:textStyle="bold"
+            android:textSize="22sp"
+            android:layout_marginBottom="16dp" />
+
+        <Button
+            android:id="@+id/btn_run_hotspot_diagnostics"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/diagnostics_run_hotspot_test" />
+    </LinearLayout>
 
 </LinearLayout>

@@ -17,19 +17,22 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import com.agentkosticka.easierspot.R
 import com.agentkosticka.easierspot.data.db.AppDatabase
+import com.agentkosticka.easierspot.data.model.RememberedServer
 import com.agentkosticka.easierspot.service.BleHotspotService
 import com.agentkosticka.easierspot.ui.diagnostics.DiagnosticsActivity
 import com.agentkosticka.easierspot.ui.dialogs.ApprovalDialog
+import com.agentkosticka.easierspot.ui.dialogs.RememberedDeviceDialog
 import com.agentkosticka.easierspot.ui.settings.SettingsActivity
 import com.agentkosticka.easierspot.util.LogUtils
 import kotlinx.coroutines.launch
 import java.util.UUID
 
-class ServerActivity : AppCompatActivity(), ApprovalDialog.ApprovalListener {
+class ServerActivity : AppCompatActivity(), ApprovalDialog.ApprovalListener, RememberedDeviceDialog.RememberedDeviceListener {
     companion object {
         private const val TAG = "ServerActivity"
         private const val REQUEST_ENABLE_BT = 1001
         private const val APPROVAL_DIALOG_TAG = "approval_dialog"
+        private const val REMEMBERED_DIALOG_TAG = "remembered_dialog"
         private const val STATE_PREFS = "server_service_state"
         private const val KEY_RUNNING = "running"
     }
@@ -69,15 +72,21 @@ class ServerActivity : AppCompatActivity(), ApprovalDialog.ApprovalListener {
             )
             rememberedList.adapter = rememberedAdapter
 
-            rememberedList.setOnItemLongClickListener { _, _, position, _ ->
-                val stableId = rememberedDeviceRows.getOrNull(position)?.get("stableId")
-                if (!stableId.isNullOrBlank()) {
-                    lifecycleScope.launch {
-                        database.rememberedServerDao().deleteServer(stableId)
-                        Toast.makeText(this@ServerActivity, "Removed remembered device", Toast.LENGTH_SHORT).show()
-                    }
+            rememberedList.setOnItemClickListener { _, _, position, _ ->
+                val selected = rememberedDeviceRows.getOrNull(position) ?: return@setOnItemClickListener
+                val stableId = selected["stableId"] ?: return@setOnItemClickListener
+                val deviceName = selected["deviceName"] ?: stableId
+                val nickname = selected["nickname"]
+                val approvalPolicy = selected["approvalPolicy"] ?: RememberedServer.APPROVAL_POLICY_ASK
+
+                if (supportFragmentManager.findFragmentByTag(REMEMBERED_DIALOG_TAG) == null) {
+                    RememberedDeviceDialog.newInstance(
+                        deviceId = stableId,
+                        deviceName = deviceName,
+                        currentNickname = nickname,
+                        approvalPolicy = approvalPolicy
+                    ).show(supportFragmentManager, REMEMBERED_DIALOG_TAG)
                 }
-                true
             }
 
             startButton.setOnClickListener {
@@ -120,16 +129,56 @@ class ServerActivity : AppCompatActivity(), ApprovalDialog.ApprovalListener {
         lifecycleScope.launch {
             database.rememberedServerDao().getAllServers().collect { servers ->
                 rememberedDeviceRows.clear()
+                val now = System.currentTimeMillis()
                 servers.forEach { server ->
+                    val canonicalId = server.deviceId
+                        .trim()
+                        .replace(Regex("^(?i)(client-)+"), "")
+                        .ifBlank { server.deviceId }
+                    val nickname = server.nickname?.trim().orEmpty()
+                    val title = if (nickname.isNotEmpty()) nickname else canonicalId
+                    val lastApprovedText = if (server.lastApprovedAt > 0L) {
+                        val secondsAgo = ((now - server.lastApprovedAt).coerceAtLeast(0L)) / 1000
+                        getString(R.string.remembered_last_approved_seconds_ago, secondsAgo)
+                    } else {
+                        getString(R.string.remembered_last_approved_never)
+                    }
+                    val meta = if (nickname.isNotEmpty()) {
+                        getString(
+                            R.string.remembered_meta_with_id_policy,
+                            canonicalId,
+                            policyLabel(server.approvalPolicy),
+                            lastApprovedText
+                        )
+                    } else {
+                        getString(
+                            R.string.remembered_meta_with_policy,
+                            policyLabel(server.approvalPolicy),
+                            lastApprovedText
+                        )
+                    }
+
                     rememberedDeviceRows.add(
                         mapOf(
-                            "name" to "${server.deviceName} (${server.deviceId})",
-                            "meta" to "Last address: ${server.deviceAddress.ifBlank { "unknown" }} | Approved: ${server.isApproved}"
+                            "name" to title,
+                            "meta" to meta,
+                            "stableId" to server.deviceId,
+                            "deviceName" to server.deviceName,
+                            "nickname" to nickname,
+                            "approvalPolicy" to server.approvalPolicy
                         )
                     )
                 }
                 rememberedAdapter?.notifyDataSetChanged()
             }
+        }
+    }
+
+    private fun policyLabel(policy: String): String {
+        return when (policy) {
+            RememberedServer.APPROVAL_POLICY_APPROVED -> getString(R.string.approval_policy_approved)
+            RememberedServer.APPROVAL_POLICY_DENIED -> getString(R.string.approval_policy_denied)
+            else -> getString(R.string.approval_policy_ask)
         }
     }
 
@@ -262,6 +311,47 @@ class ServerActivity : AppCompatActivity(), ApprovalDialog.ApprovalListener {
             putExtra(BleHotspotService.EXTRA_CLIENT_ADDRESS, deviceAddress)
         }
         startService(denyIntent)
+    }
+
+    override fun onRememberedDeviceSave(deviceId: String, nickname: String?, approvalPolicy: String) {
+        lifecycleScope.launch {
+            val normalizedNickname = nickname?.trim()?.takeIf { it.isNotEmpty() }
+            val dao = database.rememberedServerDao()
+            val current = dao.getServerById(deviceId)
+            if (current != null) {
+                val updatedApprovedState = when (approvalPolicy) {
+                    RememberedServer.APPROVAL_POLICY_APPROVED -> true
+                    RememberedServer.APPROVAL_POLICY_DENIED -> false
+                    else -> current.isApproved
+                }
+                dao.insertServer(
+                    current.copy(
+                        nickname = normalizedNickname,
+                        approvalPolicy = approvalPolicy,
+                        isApproved = updatedApprovedState
+                    )
+                )
+            } else {
+                dao.updateNickname(deviceId, normalizedNickname)
+                dao.updateApprovalPolicy(deviceId, approvalPolicy)
+            }
+            Toast.makeText(
+                this@ServerActivity,
+                getString(R.string.remembered_device_updated),
+                Toast.LENGTH_SHORT
+            ).show()
+        }
+    }
+
+    override fun onRememberedDeviceForget(deviceId: String) {
+        lifecycleScope.launch {
+            database.rememberedServerDao().deleteServer(deviceId)
+            Toast.makeText(
+                this@ServerActivity,
+                getString(R.string.remembered_device_removed),
+                Toast.LENGTH_SHORT
+            ).show()
+        }
     }
 
     override fun onDestroy() {

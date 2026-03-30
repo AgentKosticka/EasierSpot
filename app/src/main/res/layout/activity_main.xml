@@ -3,62 +3,71 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
-    android:padding="16dp"
     android:fitsSystemWindows="true">
 
     <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:gravity="end"
-        android:layout_marginBottom="8dp">
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:paddingTop="16dp"
+        android:paddingBottom="16dp"
+        android:paddingStart="@dimen/padding_horizontal_safe"
+        android:paddingEnd="@dimen/padding_horizontal_safe">
 
-        <ImageButton
-            android:id="@+id/btn_settings"
-            android:layout_width="40dp"
-            android:layout_height="40dp"
-            android:background="?attr/selectableItemBackgroundBorderless"
-            android:contentDescription="@string/action_settings"
-            android:src="@android:drawable/ic_menu_manage" />
-    </LinearLayout>
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="end"
+            android:layout_marginBottom="8dp">
 
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1"
-        android:gravity="center"
-        android:orientation="vertical">
+            <ImageButton
+                android:id="@+id/btn_settings"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="@string/action_settings"
+                android:src="@android:drawable/ic_menu_manage" />
+        </LinearLayout>
 
-    <TextView
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="EasierSpot"
-        android:textSize="32sp"
-        android:textStyle="bold"
-        android:gravity="center"
-        android:layout_marginBottom="32dp" />
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:gravity="center"
+            android:orientation="vertical">
 
-    <TextView
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="Select Mode"
-        android:textSize="18sp"
-        android:gravity="center"
-        android:layout_marginBottom="24dp" />
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="EasierSpot"
+                android:textSize="32sp"
+                android:textStyle="bold"
+                android:gravity="center"
+                android:layout_marginBottom="32dp" />
 
-    <Button
-        android:id="@+id/btn_client_mode"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="Connect to Hotspot (Client)"
-        android:layout_marginBottom="16dp"
-        android:padding="16dp" />
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Select Mode"
+                android:textSize="18sp"
+                android:gravity="center"
+                android:layout_marginBottom="24dp" />
 
-    <Button
-        android:id="@+id/btn_server_mode"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="Share Hotspot (Server)"
-        android:padding="16dp" />
+            <Button
+                android:id="@+id/btn_client_mode"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Connect to Hotspot (Client)"
+                android:layout_marginBottom="16dp"
+                android:padding="16dp" />
+
+            <Button
+                android:id="@+id/btn_server_mode"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Share Hotspot (Server)"
+                android:padding="16dp" />
+        </LinearLayout>
     </LinearLayout>
 
 </LinearLayout>

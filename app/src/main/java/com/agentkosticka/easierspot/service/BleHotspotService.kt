@@ -36,6 +36,12 @@ import kotlinx.coroutines.withContext
 import java.util.UUID
 
 class BleHotspotService : Service() {
+    internal enum class ApprovalDecision {
+        REQUEST_APPROVAL,
+        AUTO_DENY,
+        AUTO_APPROVE
+    }
+
     companion object {
         private const val TAG = "BleHotspotService"
         private const val NOTIFICATION_ID = 1
@@ -190,28 +196,80 @@ class BleHotspotService : Service() {
     private fun checkAndRequestApproval(clientAddress: String, clientStableId: String?) {
         serviceScope.launch {
             val dao = database.rememberedServerDao()
-            val server = if (!clientStableId.isNullOrBlank()) {
+            val rememberedClient = if (!clientStableId.isNullOrBlank()) {
                 dao.getServerById(clientStableId) ?: dao.getServerByAddress(clientAddress)
             } else {
                 dao.getServerByAddress(clientAddress)
             }
-            
-            if (server?.isApproved == true) {
-                // Already approved, send credentials immediately
-                LogUtils.i(TAG, "Client $clientAddress already approved (stableId=${server.deviceId})")
+
+            if (rememberedClient != null) {
                 dao.insertServer(
-                    server.copy(
+                    rememberedClient.copy(
                         deviceAddress = clientAddress,
                         lastSeen = System.currentTimeMillis()
                     )
                 )
-                activateHotspotAndSendCredentials(clientAddress)
-            } else {
-                LogUtils.i(TAG, "New client $clientAddress requires approval")
-                val displayId = clientStableId ?: "Unknown"
-                dispatchApprovalRequest(clientAddress, displayId, "Client-$displayId")
+            }
+
+            when (decideApprovalDecision(rememberedClient)) {
+                ApprovalDecision.REQUEST_APPROVAL -> {
+                    if (rememberedClient == null) {
+                        LogUtils.i(TAG, "New client $clientAddress requires approval")
+                        val displayId = clientStableId ?: "Unknown"
+                        dispatchApprovalRequest(clientAddress, displayId, "Client-$displayId")
+                    } else {
+                        LogUtils.i(TAG, "Client $clientAddress requires approval")
+                        dispatchApprovalRequest(clientAddress, rememberedClient.deviceId, rememberedClient.deviceName)
+                    }
+                }
+                ApprovalDecision.AUTO_DENY -> {
+                    LogUtils.i(TAG, "Client $clientAddress denied by saved policy")
+                    denyClient(clientAddress)
+                }
+                ApprovalDecision.AUTO_APPROVE -> {
+                    val remembered = rememberedClient ?: return@launch
+                    LogUtils.i(TAG, "Client $clientAddress auto-approved by saved policy")
+                    activateHotspotAndSendCredentials(clientAddress, remembered.deviceId)
+                }
             }
         }
+    }
+
+    internal fun decideApprovalDecision(rememberedClient: RememberedServer?): ApprovalDecision {
+        if (rememberedClient == null) return ApprovalDecision.REQUEST_APPROVAL
+        return when (rememberedClient.approvalPolicy) {
+            RememberedServer.APPROVAL_POLICY_DENIED -> ApprovalDecision.AUTO_DENY
+            RememberedServer.APPROVAL_POLICY_ASK -> ApprovalDecision.REQUEST_APPROVAL
+            RememberedServer.APPROVAL_POLICY_APPROVED -> {
+                if (rememberedClient.isApproved) {
+                    ApprovalDecision.AUTO_APPROVE
+                } else {
+                    ApprovalDecision.REQUEST_APPROVAL
+                }
+            }
+            else -> ApprovalDecision.REQUEST_APPROVAL
+        }
+    }
+
+    internal fun mergeApprovalMetadata(
+        existing: RememberedServer,
+        clientAddress: String,
+        clientName: String,
+        approvedAt: Long
+    ): RememberedServer {
+        val fallbackName = "Client-${existing.deviceId}"
+        val incomingName = clientName.takeUnless { it.isBlank() || it == "Unknown Device" }
+        return existing.copy(
+            deviceName = if (existing.deviceName.isBlank()) {
+                incomingName ?: fallbackName
+            } else {
+                existing.deviceName
+            },
+            deviceAddress = clientAddress,
+            lastSeen = approvedAt,
+            lastApprovedAt = approvedAt,
+            isApproved = true
+        )
     }
 
     private fun dispatchApprovalRequest(clientAddress: String, deviceId: String, deviceName: String?) {
@@ -225,7 +283,7 @@ class BleHotspotService : Service() {
         showApprovalNotification(clientAddress, deviceId, deviceName)
     }
     
-    private suspend fun activateHotspotAndSendCredentials(clientAddress: String) {
+    private suspend fun activateHotspotAndSendCredentials(clientAddress: String, clientDeviceId: String? = null) {
         val hotspotStarted = hotspotManager?.startHotspot() ?: false
         
         if (!hotspotStarted) {
@@ -241,7 +299,7 @@ class BleHotspotService : Service() {
                 while (attempts < 30) { // Wait up to 30 seconds
                     delay(1000)
                     if (hotspotManager?.isHotspotEnabled() == true) {
-                        sendCredentialsToClient(clientAddress)
+                        sendCredentialsToClient(clientAddress, clientDeviceId)
                         return
                     }
                     attempts++
@@ -256,20 +314,23 @@ class BleHotspotService : Service() {
         
         delay(1000)
         
-        sendCredentialsToClient(clientAddress)
+        sendCredentialsToClient(clientAddress, clientDeviceId)
     }
     
-    private suspend fun sendCredentialsToClient(clientAddress: String) {
+    private suspend fun sendCredentialsToClient(clientAddress: String, clientDeviceId: String? = null) {
         val credentials = hotspotManager?.getHotspotCredentials()
         LogUtils.i(TAG, "Credentials: ssid=${credentials?.ssid ?: "(null)"}")
-        
-        withContext(Dispatchers.Main) {
-            if (credentials != null && credentials.ssid.isNotEmpty()) {
+
+        if (credentials != null && credentials.ssid.isNotEmpty()) {
+            updateLastApprovedAt(clientAddress, clientDeviceId)
+            withContext(Dispatchers.Main) {
                 gattServer?.approveClient(clientAddress)
                 // Small delay to ensure approval notification is sent first
                 delay(100)
                 gattServer?.sendHotspotCredentials(clientAddress, credentials)
-            } else {
+            }
+        } else {
+            withContext(Dispatchers.Main) {
                 LogUtils.w(TAG, "No hotspot credentials available; denying client")
                 gattServer?.denyClient(clientAddress)
             }
@@ -305,15 +366,45 @@ class BleHotspotService : Service() {
 
     private fun approveClient(clientAddress: String, clientDeviceId: String, clientName: String) {
         serviceScope.launch {
-            database.rememberedServerDao().insertServer(
-                RememberedServer(
-                    deviceId = clientDeviceId,
-                    deviceName = clientName.ifBlank { "Client-$clientDeviceId" },
+            val dao = database.rememberedServerDao()
+            val existing = dao.getServerById(clientDeviceId) ?: dao.getServerByAddress(clientAddress)
+            val approvedAt = System.currentTimeMillis()
+
+            if (existing != null) {
+                dao.insertServer(mergeApprovalMetadata(existing, clientAddress, clientName, approvedAt))
+            } else {
+                dao.insertServer(
+                    RememberedServer(
+                        deviceId = clientDeviceId,
+                        deviceName = clientName.ifBlank { "Client-$clientDeviceId" },
+                        deviceAddress = clientAddress,
+                        lastSeen = approvedAt,
+                        lastApprovedAt = approvedAt,
+                        isApproved = true
+                    )
+                )
+            }
+            activateHotspotAndSendCredentials(clientAddress, clientDeviceId)
+        }
+    }
+
+    private suspend fun updateLastApprovedAt(clientAddress: String, clientDeviceId: String?) {
+        val dao = database.rememberedServerDao()
+        val server = if (!clientDeviceId.isNullOrBlank()) {
+            dao.getServerById(clientDeviceId) ?: dao.getServerByAddress(clientAddress)
+        } else {
+            dao.getServerByAddress(clientAddress)
+        }
+        server?.let {
+            val approvedAt = System.currentTimeMillis()
+            dao.insertServer(
+                it.copy(
                     deviceAddress = clientAddress,
+                    lastSeen = approvedAt,
+                    lastApprovedAt = approvedAt,
                     isApproved = true
                 )
             )
-            activateHotspotAndSendCredentials(clientAddress)
         }
     }
 

@@ -65,7 +65,7 @@ class ClientActivity : AppCompatActivity() {
         setContentView(R.layout.activity_client)
         Log.d(TAG, "onCreate()")
 
-        title = "Connect to Hotspot"
+        title = getString(R.string.client_screen_title)
 
         bleScanner = BleScanner(this)
         gattClient = GattClient(this)
@@ -121,7 +121,7 @@ class ClientActivity : AppCompatActivity() {
                 if (error != null) {
                     Log.e(TAG, "Scan error: $error")
                     Toast.makeText(this@ClientActivity, error, Toast.LENGTH_LONG).show()
-                    scanButton.text = "Start Scan"
+                    scanButton.text = getString(R.string.client_scan_start)
                 }
             }
         }
@@ -222,11 +222,11 @@ class ClientActivity : AppCompatActivity() {
         // Toggle scanning
         if (!bleScanner.isScanning.value) {
             Log.d(TAG, "Starting scan...")
-            scanButton.text = "Stop Scan"
+            scanButton.text = getString(R.string.client_scan_stop)
             bleScanner.startScan()
         } else {
             Log.d(TAG, "Stopping scan...")
-            scanButton.text = "Start Scan"
+            scanButton.text = getString(R.string.client_scan_start)
             bleScanner.stopScan()
         }
     }
@@ -281,7 +281,7 @@ class ClientActivity : AppCompatActivity() {
         showConnectionStatus("Connecting to ${server.deviceName}...")
         gattClient.connect(server.bluetoothDevice)
         bleScanner.stopScan()
-        scanButton.text = "Start Scan"
+        scanButton.text = getString(R.string.client_scan_start)
     }
 
     private fun hasRequiredPermissions(): Boolean {
