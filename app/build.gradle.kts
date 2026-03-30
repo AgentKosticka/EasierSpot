@@ -50,14 +50,14 @@ dependencies {
     implementation(libs.material)
     implementation(libs.androidx.activity)
     implementation(libs.androidx.constraintlayout)
-    implementation("org.lsposed.hiddenapibypass:hiddenapibypass:6.1")
+    implementation(libs.hiddenapibypass)
     
     // System API stubs for Shizuku AIDL access
     implementation(project(":system-api-stubs"))
     
     // HiddenApiRefine for type-safe hidden API access
-    implementation("dev.rikka.tools.refine:runtime:4.4.0")
-    compileOnly("dev.rikka.tools.refine:annotation:4.4.0")
+    implementation(libs.runtime)
+    compileOnly(libs.annotation)
     
     // Shizuku
     implementation(libs.shizuku.api)

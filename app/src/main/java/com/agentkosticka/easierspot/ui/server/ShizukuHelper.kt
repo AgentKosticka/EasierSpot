@@ -11,7 +11,7 @@ object ShizukuHelper {
     fun isShizukuAvailable(): Boolean {
         return try {
             Shizuku.pingBinder()
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             false
         }
     }

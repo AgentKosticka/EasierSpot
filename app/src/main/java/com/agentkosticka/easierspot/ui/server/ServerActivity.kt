@@ -7,7 +7,6 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
-import android.os.Build
 import android.os.Bundle
 import android.widget.Button
 import android.widget.ImageButton
@@ -267,12 +266,8 @@ class ServerActivity : AppCompatActivity(), ApprovalDialog.ApprovalListener, Rem
                             action = BleHotspotService.ACTION_START_SERVER
                             putExtra(BleHotspotService.EXTRA_DEVICE_ID, deviceId)
                         }
-                        
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                            startForegroundService(serviceIntent)
-                        } else {
-                            startService(serviceIntent)
-                        }
+
+                        startForegroundService(serviceIntent)
                         persistServerState(true)
                         syncServerUiState()
                     } catch (e: Exception) {

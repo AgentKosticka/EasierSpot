@@ -17,8 +17,6 @@ import com.agentkosticka.easierspot.ble.BleConstants
 import com.agentkosticka.easierspot.data.model.HotspotCredentials
 import com.agentkosticka.easierspot.util.LogUtils
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
 import java.nio.ByteBuffer
 import java.nio.charset.StandardCharsets
 

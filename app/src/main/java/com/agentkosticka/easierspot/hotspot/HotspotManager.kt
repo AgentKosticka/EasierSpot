@@ -78,11 +78,7 @@ class HotspotManager(private val context: Context) {
         LogUtils.w(TAG, "Shizuku methods failed, trying reflection fallback")
         return try {
             val wifiManager = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                getHotspotCredentialsOreo(wifiManager)
-            } else {
-                getHotspotCredentialsLegacy(wifiManager)
-            }
+            getHotspotCredentialsOreo(wifiManager)
         } catch (e: Exception) {
             LogUtils.e(TAG, "All credential retrieval methods failed", e)
             null
@@ -463,34 +459,34 @@ class HotspotManager(private val context: Context) {
         }
     }
 
-    private fun getHotspotCredentialsLegacy(wifiManager: WifiManager): HotspotCredentials? {
-        return try {
-            val getWifiApConfigurationMethod = wifiManager.javaClass.getMethod("getWifiApConfiguration")
-            val wifiConfig = getWifiApConfigurationMethod.invoke(wifiManager)
-
-            if (wifiConfig != null) {
-                val ssidField = wifiConfig.javaClass.getDeclaredField("SSID")
-                ssidField.isAccessible = true
-                val ssid = ssidField.get(wifiConfig) as? String ?: ""
-
-                val pskField = wifiConfig.javaClass.getDeclaredField("preSharedKey")
-                pskField.isAccessible = true
-                val passphrase = pskField.get(wifiConfig) as? String ?: ""
-
-                if (ssid.isNotEmpty()) {
-                    HotspotCredentials(ssid, passphrase)
-                } else {
-                    null
-                }
-            } else {
-                LogUtils.w(TAG, "WifiConfiguration is null")
-                null
-            }
-        } catch (e: Exception) {
-            LogUtils.e(TAG, "Failed to get WifiConfiguration: ${e.message}")
-            null
-        }
-    }
+//    private fun getHotspotCredentialsLegacy(wifiManager: WifiManager): HotspotCredentials? {
+//        return try {
+//            val getWifiApConfigurationMethod = wifiManager.javaClass.getMethod("getWifiApConfiguration")
+//            val wifiConfig = getWifiApConfigurationMethod.invoke(wifiManager)
+//
+//            if (wifiConfig != null) {
+//                val ssidField = wifiConfig.javaClass.getDeclaredField("SSID")
+//                ssidField.isAccessible = true
+//                val ssid = ssidField.get(wifiConfig) as? String ?: ""
+//
+//                val pskField = wifiConfig.javaClass.getDeclaredField("preSharedKey")
+//                pskField.isAccessible = true
+//                val passphrase = pskField.get(wifiConfig) as? String ?: ""
+//
+//                if (ssid.isNotEmpty()) {
+//                    HotspotCredentials(ssid, passphrase)
+//                } else {
+//                    null
+//                }
+//            } else {
+//                LogUtils.w(TAG, "WifiConfiguration is null")
+//                null
+//            }
+//        } catch (e: Exception) {
+//            LogUtils.e(TAG, "Failed to get WifiConfiguration: ${e.message}")
+//            null
+//        }
+//    }
 
     fun isHotspotEnabled(): Boolean {
         val wifiManager = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
@@ -587,7 +583,7 @@ class HotspotManager(private val context: Context) {
     private fun isShizukuReady(): Boolean {
         return try {
             Shizuku.pingBinder() && Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             false
         }
     }
@@ -642,55 +638,55 @@ class HotspotManager(private val context: Context) {
         }
     }
 
-    private fun stopTetheringViaShell(): Boolean {
-        val commands = listOf(
-            arrayOf("/system/bin/cmd", "connectivity", "tether", "stop", "wifi"),
-            arrayOf("cmd", "connectivity", "tether", "stop", "wifi"),
-            arrayOf("/system/bin/cmd", "connectivity", "tether", "stop", "--type", "wifi"),
-            arrayOf("cmd", "connectivity", "tether", "stop", "--type", "wifi"),
-            arrayOf("/system/bin/cmd", "connectivity", "tether", "stop"),
-            arrayOf("cmd", "connectivity", "tether", "stop"),
-            arrayOf("/system/bin/cmd", "tethering", "stop", "wifi"),
-            arrayOf("cmd", "tethering", "stop", "wifi"),
-            arrayOf("/system/bin/cmd", "tethering", "stop", "--type", "wifi"),
-            arrayOf("cmd", "tethering", "stop", "--type", "wifi"),
-            arrayOf("/system/bin/cmd", "wifi", "stop-softap"),
-            arrayOf("cmd", "wifi", "stop-softap"),
-            arrayOf("service", "call", "wifi", "49")
-        )
-        for (command in commands) {
-            val result = runShizukuCommand(command)
-            if (result.exitCode == 0) {
-                LogUtils.diag(TAG, "Hotspot stop command succeeded: ${command.joinToString(" ")}")
-                return true
-            }
-        }
-        return false
-    }
-
-    private fun stopTetheringViaConnector(): Boolean {
-        return try {
-            val connector = getTetheringConnector() ?: return false
-            val methods = connector.javaClass.methods
-                .filter { it.name == "stopTethering" }
-                .sortedByDescending { scoreTetheringMethod(it) }
-
-            for (method in methods) {
-                val args = buildTetheringArgs(method, isStart = false) ?: continue
-                runCatching {
-                    method.invoke(connector, *args)
-                    LogUtils.diag(TAG, "Connector stopTethering invoked")
-                    return true
-                }
-            }
-
-            LogUtils.w(TAG, "No supported stopTethering signature succeeded")
-            false
-        } catch (e: Exception) {
-            LogUtils.e(TAG, "stopTetheringViaConnector failed: ${e.message}")
-            false
-        }
-    }
+//    private fun stopTetheringViaShell(): Boolean {
+//        val commands = listOf(
+//            arrayOf("/system/bin/cmd", "connectivity", "tether", "stop", "wifi"),
+//            arrayOf("cmd", "connectivity", "tether", "stop", "wifi"),
+//            arrayOf("/system/bin/cmd", "connectivity", "tether", "stop", "--type", "wifi"),
+//            arrayOf("cmd", "connectivity", "tether", "stop", "--type", "wifi"),
+//            arrayOf("/system/bin/cmd", "connectivity", "tether", "stop"),
+//            arrayOf("cmd", "connectivity", "tether", "stop"),
+//            arrayOf("/system/bin/cmd", "tethering", "stop", "wifi"),
+//            arrayOf("cmd", "tethering", "stop", "wifi"),
+//            arrayOf("/system/bin/cmd", "tethering", "stop", "--type", "wifi"),
+//            arrayOf("cmd", "tethering", "stop", "--type", "wifi"),
+//            arrayOf("/system/bin/cmd", "wifi", "stop-softap"),
+//            arrayOf("cmd", "wifi", "stop-softap"),
+//            arrayOf("service", "call", "wifi", "49")
+//        )
+//        for (command in commands) {
+//            val result = runShizukuCommand(command)
+//            if (result.exitCode == 0) {
+//                LogUtils.diag(TAG, "Hotspot stop command succeeded: ${command.joinToString(" ")}")
+//                return true
+//            }
+//        }
+//        return false
+//    }
+//
+//    private fun stopTetheringViaConnector(): Boolean {
+//        return try {
+//            val connector = getTetheringConnector() ?: return false
+//            val methods = connector.javaClass.methods
+//                .filter { it.name == "stopTethering" }
+//                .sortedByDescending { scoreTetheringMethod(it) }
+//
+//            for (method in methods) {
+//                val args = buildTetheringArgs(method, isStart = false) ?: continue
+//                runCatching {
+//                    method.invoke(connector, *args)
+//                    LogUtils.diag(TAG, "Connector stopTethering invoked")
+//                    return true
+//                }
+//            }
+//
+//            LogUtils.w(TAG, "No supported stopTethering signature succeeded")
+//            false
+//        } catch (e: Exception) {
+//            LogUtils.e(TAG, "stopTetheringViaConnector failed: ${e.message}")
+//            false
+//        }
+//    }
 
     private fun scoreTetheringMethod(method: Method): Int {
         val params = method.parameterTypes
@@ -843,7 +839,7 @@ class HotspotManager(private val context: Context) {
                 )
                 try {
                     publicMethod.invoke(null, command, null, null) as Process
-                } catch (e: IllegalAccessException) {
+                } catch (_: IllegalAccessException) {
                     publicMethod.isAccessible = true
                     publicMethod.invoke(null, command, null, null) as Process
                 }

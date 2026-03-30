@@ -2,6 +2,7 @@ package com.agentkosticka.easierspot.ui.settings
 
 import android.content.Context
 import androidx.appcompat.app.AppCompatDelegate
+import androidx.core.content.edit
 
 object ThemePreferences {
     private const val PREFS_NAME = "ui_prefs"
@@ -26,9 +27,9 @@ object ThemePreferences {
 
     fun setThemeMode(context: Context, mode: ThemeMode) {
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            .edit()
-            .putString(KEY_THEME_MODE, mode.value)
-            .apply()
+            .edit {
+                putString(KEY_THEME_MODE, mode.value)
+            }
     }
 
     fun applyThemeMode(context: Context) {

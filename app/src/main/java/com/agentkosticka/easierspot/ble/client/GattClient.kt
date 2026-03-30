@@ -26,6 +26,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import java.nio.charset.StandardCharsets
 import java.util.UUID
+import androidx.core.content.edit
 
 @SuppressLint("MissingPermission")
 class GattClient(private val context: Context) {
@@ -38,6 +39,8 @@ class GattClient(private val context: Context) {
     private var gatt: BluetoothGatt? = null
     private var pendingDeviceIdRead = false
     private var pendingClientIdWrite = false
+
+    // CCCD Cccd
     private var pendingHotspotCccdWrite = false
     private var pendingHotspotRead = false
     private var approvalPollJob: Job? = null
@@ -111,7 +114,7 @@ class GattClient(private val context: Context) {
         val existing = prefs.getString("stable_client_id", null)
         if (!existing.isNullOrBlank()) return existing
         val generated = "client-" + UUID.randomUUID().toString().replace("-", "").take(12)
-        prefs.edit().putString("stable_client_id", generated).apply()
+        prefs.edit { putString("stable_client_id", generated) }
         return generated
     }
     
@@ -320,6 +323,7 @@ class GattClient(private val context: Context) {
             }
         }
 
+        @Deprecated("Deprecated in Java")
         override fun onCharacteristicRead(
             gatt: BluetoothGatt,
             characteristic: BluetoothGattCharacteristic,
@@ -381,6 +385,7 @@ class GattClient(private val context: Context) {
             }
         }
 
+        @Deprecated("Deprecated in Java")
         override fun onCharacteristicChanged(
             gatt: BluetoothGatt,
             characteristic: BluetoothGattCharacteristic

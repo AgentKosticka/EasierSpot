@@ -3,18 +3,17 @@ package com.agentkosticka.easierspot.ui.client
 import android.Manifest
 import android.bluetooth.BluetoothAdapter
 import android.content.BroadcastReceiver
+import android.content.DialogInterface
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
-import android.content.DialogInterface
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
 import android.net.wifi.WifiManager
-import android.net.wifi.WifiNetworkSuggestion
 import android.net.wifi.WifiNetworkSpecifier
-import android.os.Build
+import android.net.wifi.WifiNetworkSuggestion
 import android.os.Bundle
 import android.provider.Settings
 import android.util.Log
@@ -396,8 +395,6 @@ class ClientActivity : AppCompatActivity() {
     }
 
     private fun connectToHotspotViaAddNetworks(credentials: HotspotCredentials): Boolean {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return false
-
         val suggestion = buildNetworkSuggestion(credentials)
         val intent = Intent(Settings.ACTION_WIFI_ADD_NETWORKS).apply {
             putParcelableArrayListExtra(
@@ -552,7 +549,7 @@ class ClientActivity : AppCompatActivity() {
                                     }
                                 }
                             }
-                        } catch (e: TimeoutCancellationException) {
+                        } catch (_: TimeoutCancellationException) {
                             Log.w(TAG, "StabilityGate: TIMEOUT for ${credentials.ssid} - 10 second limit exceeded")
                             addNetworkStabilityCredentials = null
                             awaitingAddNetworkConnectionCredentials = null
@@ -737,20 +734,8 @@ class ClientActivity : AppCompatActivity() {
         pendingCredentials = credentials
         showConnectionStatus("Please enable Wi-Fi to continue")
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            Toast.makeText(this, "Wi-Fi is off. Please enable it and return.", Toast.LENGTH_LONG).show()
-            startActivity(Intent(Settings.Panel.ACTION_WIFI))
-        } else {
-            @Suppress("DEPRECATION")
-            val toggled = runCatching {
-                wifiManager.isWifiEnabled = true
-                wifiManager.isWifiEnabled
-            }.getOrDefault(false)
-            if (!toggled) {
-                Toast.makeText(this, "Could not enable Wi-Fi automatically. Please enable it.", Toast.LENGTH_LONG).show()
-                startActivity(Intent(Settings.ACTION_WIFI_SETTINGS))
-            }
-        }
+        Toast.makeText(this, "Wi-Fi is off. Please enable it and return.", Toast.LENGTH_LONG).show()
+        startActivity(Intent(Settings.Panel.ACTION_WIFI))
         return false
     }
 
@@ -837,7 +822,6 @@ class ClientActivity : AppCompatActivity() {
     }
 
     private fun registerSuggestionPostConnectReceiver() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return
         if (suggestionPostConnectReceiver != null) return
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(context: android.content.Context?, intent: Intent?) {

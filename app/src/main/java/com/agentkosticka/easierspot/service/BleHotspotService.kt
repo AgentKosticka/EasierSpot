@@ -117,11 +117,7 @@ class BleHotspotService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         try {
             val notification = createNotification()
-            val serviceType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
-            } else {
-                0
-            }
+            val serviceType = ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
             ServiceCompat.startForeground(this, NOTIFICATION_ID, notification, serviceType)
 
             when (intent?.action) {
@@ -538,11 +534,8 @@ class BleHotspotService : Service() {
                 action = ACTION_START_SERVER
                 putExtra(EXTRA_DEVICE_ID, restartDeviceId)
             }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                ContextCompat.startForegroundService(this, restartIntent)
-            } else {
-                startService(restartIntent)
-            }
+
+            ContextCompat.startForegroundService(this, restartIntent)
         }
     }
 
