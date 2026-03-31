@@ -3,11 +3,14 @@ package com.agentkosticka.easierspot.ui.server
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothManager
 import android.content.BroadcastReceiver
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.ServiceConnection
 import android.content.pm.PackageManager
 import android.os.Bundle
+import android.os.IBinder
 import android.widget.Button
 import android.widget.ImageButton
 import android.widget.ListView
@@ -16,7 +19,6 @@ import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
-import androidx.core.content.edit
 import androidx.lifecycle.lifecycleScope
 import com.agentkosticka.easierspot.R
 import com.agentkosticka.easierspot.data.db.AppDatabase
@@ -34,8 +36,6 @@ class ServerActivity : AppCompatActivity(), ApprovalDialog.ApprovalListener, Rem
         private const val TAG = "ServerActivity"
         private const val APPROVAL_DIALOG_TAG = "approval_dialog"
         private const val REMEMBERED_DIALOG_TAG = "remembered_dialog"
-        private const val STATE_PREFS = "server_service_state"
-        private const val KEY_RUNNING = "running"
     }
     
     private val deviceId = UUID.randomUUID().toString().take(4)
@@ -43,6 +43,18 @@ class ServerActivity : AppCompatActivity(), ApprovalDialog.ApprovalListener, Rem
     private val rememberedDeviceRows = mutableListOf<Map<String, String>>()
     private var rememberedAdapter: SimpleAdapter? = null
     private var approvalReceiverRegistered = false
+    private var serviceBound = false
+    private val serviceConnection = object : ServiceConnection {
+        override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
+            serviceBound = (service as? BleHotspotService.LocalBinder)?.getService() != null
+            applyServerUiState(BleHotspotService.isServerRunning)
+        }
+
+        override fun onServiceDisconnected(name: ComponentName?) {
+            serviceBound = false
+            applyServerUiState(false)
+        }
+    }
     private val enableBluetoothLauncher =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
             if (result.resultCode == RESULT_OK) {
@@ -106,8 +118,6 @@ class ServerActivity : AppCompatActivity(), ApprovalDialog.ApprovalListener, Rem
             stopButton.setOnClickListener {
                 try {
                     stopSharing()
-                    startButton.isEnabled = true
-                    stopButton.isEnabled = false
                 } catch (e: Exception) {
                     Toast.makeText(this, "Error: ${e.message}", Toast.LENGTH_LONG).show()
                 }
@@ -120,7 +130,7 @@ class ServerActivity : AppCompatActivity(), ApprovalDialog.ApprovalListener, Rem
             stopButton.isEnabled = false
             showPendingApprovalIfPresent(intent)
             observeRememberedDevices()
-            syncServerUiState()
+            probeServiceLiveness()
         } catch (e: Exception) {
             Toast.makeText(this, "Error initializing: ${e.message}", Toast.LENGTH_LONG).show()
             finish()
@@ -268,8 +278,8 @@ class ServerActivity : AppCompatActivity(), ApprovalDialog.ApprovalListener, Rem
                         }
 
                         startForegroundService(serviceIntent)
-                        persistServerState(true)
-                        syncServerUiState()
+                        probeServiceLiveness()
+                        window.decorView.postDelayed({ probeServiceLiveness() }, 350L)
                     } catch (e: Exception) {
                         LogUtils.e(TAG, "Error starting service", e)
                         Toast.makeText(this, "Service start failed: ${e.message}", Toast.LENGTH_LONG).show()
@@ -292,26 +302,24 @@ class ServerActivity : AppCompatActivity(), ApprovalDialog.ApprovalListener, Rem
             action = BleHotspotService.ACTION_STOP_SERVER
         }
         startService(serviceIntent)
-        persistServerState(false)
-        syncServerUiState()
+        applyServerUiState(false)
+        window.decorView.postDelayed({ probeServiceLiveness() }, 200L)
     }
 
-    private fun syncServerUiState() {
-        val isRunning = readPersistedServerState()
+    private fun applyServerUiState(isRunning: Boolean) {
         findViewById<Button>(R.id.btn_start_sharing).isEnabled = !isRunning
         findViewById<Button>(R.id.btn_stop_sharing).isEnabled = isRunning
     }
 
-    private fun persistServerState(running: Boolean) {
-        getSharedPreferences(STATE_PREFS, MODE_PRIVATE)
-            .edit {
-                putBoolean(KEY_RUNNING, running)
-            }
-    }
-
-    private fun readPersistedServerState(): Boolean {
-        return getSharedPreferences(STATE_PREFS, MODE_PRIVATE)
-            .getBoolean(KEY_RUNNING, false)
+    private fun probeServiceLiveness() {
+        if (serviceBound) {
+            applyServerUiState(BleHotspotService.isServerRunning)
+            return
+        }
+        val didBind = bindService(Intent(this, BleHotspotService::class.java), serviceConnection, 0)
+        if (!didBind) {
+            applyServerUiState(false)
+        }
     }
 
     override fun onApprove(deviceId: String, deviceName: String?, deviceAddress: String) {
@@ -389,7 +397,7 @@ class ServerActivity : AppCompatActivity(), ApprovalDialog.ApprovalListener, Rem
 
     override fun onStart() {
         super.onStart()
-        syncServerUiState()
+        probeServiceLiveness()
         if (!approvalReceiverRegistered) {
             ContextCompat.registerReceiver(
                 this,
@@ -403,6 +411,10 @@ class ServerActivity : AppCompatActivity(), ApprovalDialog.ApprovalListener, Rem
 
     override fun onStop() {
         super.onStop()
+        if (serviceBound) {
+            unbindService(serviceConnection)
+            serviceBound = false
+        }
         if (approvalReceiverRegistered) {
             unregisterReceiver(approvalReceiver)
             approvalReceiverRegistered = false
@@ -411,6 +423,6 @@ class ServerActivity : AppCompatActivity(), ApprovalDialog.ApprovalListener, Rem
 
     override fun onResume() {
         super.onResume()
-        syncServerUiState()
+        probeServiceLiveness()
     }
 }

@@ -1,7 +1,6 @@
 package com.agentkosticka.easierspot.service
 
 import android.Manifest
-import android.annotation.SuppressLint
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -91,7 +90,6 @@ class BleHotspotService : Service() {
     private var gattServer: GattServer? = null
     private var hotspotManager: HotspotManager? = null
     private var currentDeviceId: String? = null
-    private var explicitStopRequested: Boolean = false
     private val serviceJob = SupervisorJob()
     private val serviceScope = CoroutineScope(
         serviceJob + Dispatchers.IO + CoroutineExceptionHandler { _, throwable ->
@@ -115,7 +113,6 @@ class BleHotspotService : Service() {
         }
     }
 
-    @SuppressLint("ForegroundServiceType")
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         try {
             val notification = createNotification()
@@ -125,7 +122,6 @@ class BleHotspotService : Service() {
             when (intent?.action) {
                 ACTION_START_SERVER -> {
                     val deviceId = intent.getStringExtra(EXTRA_DEVICE_ID) ?: UUID.randomUUID().toString().take(4)
-                    explicitStopRequested = false
                     currentDeviceId = deviceId
                     LogUtils.i(TAG, "Starting BLE server with deviceId: $deviceId")
                     startBleServer(deviceId)
@@ -133,7 +129,6 @@ class BleHotspotService : Service() {
                     persistServerState(true)
                 }
                 ACTION_STOP_SERVER -> {
-                    explicitStopRequested = true
                     stopBleServer()
                     isServerRunning = false
                     persistServerState(false)
@@ -537,21 +532,9 @@ class BleHotspotService : Service() {
     }
 
     override fun onDestroy() {
-        val shouldRestart = isServerRunning && !explicitStopRequested
-        val restartDeviceId = currentDeviceId ?: UUID.randomUUID().toString().take(4)
         serviceJob.cancel()
         super.onDestroy()
         stopBleServer()
-        if (shouldRestart) {
-            LogUtils.w(TAG, "Service destroyed unexpectedly, restarting foreground service")
-            persistServerState(true)
-            val restartIntent = Intent(this, BleHotspotService::class.java).apply {
-                action = ACTION_START_SERVER
-                putExtra(EXTRA_DEVICE_ID, restartDeviceId)
-            }
-
-            ContextCompat.startForegroundService(this, restartIntent)
-        }
     }
 
     private fun persistServerState(running: Boolean) {
