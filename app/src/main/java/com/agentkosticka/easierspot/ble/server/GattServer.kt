@@ -10,8 +10,10 @@ import android.bluetooth.BluetoothGattServerCallback
 import android.bluetooth.BluetoothGattService
 import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothProfile
+import android.bluetooth.BluetoothStatusCodes
 import android.content.Context
 import android.content.pm.PackageManager
+import android.os.Build
 import androidx.core.content.ContextCompat
 import com.agentkosticka.easierspot.ble.BleConstants
 import com.agentkosticka.easierspot.data.model.HotspotCredentials
@@ -135,8 +137,14 @@ class GattServer(private val context: Context, private val deviceId: String) {
             return
         }
 
-        characteristic.value = payload
-        val notified = gattServer?.notifyCharacteristicChanged(device, characteristic, false) == true
+        val notified = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            gattServer?.notifyCharacteristicChanged(device, characteristic, false, payload) == BluetoothStatusCodes.SUCCESS
+        } else {
+            @Suppress("DEPRECATION")
+            characteristic.value = payload
+            @Suppress("DEPRECATION")
+            gattServer?.notifyCharacteristicChanged(device, characteristic, false) == true
+        }
         LogUtils.d(TAG, "Notify $characteristicUuid to $clientAddress success=$notified")
     }
 
@@ -152,7 +160,6 @@ class GattServer(private val context: Context, private val deviceId: String) {
             BluetoothGattCharacteristic.PROPERTY_READ,
             BluetoothGattCharacteristic.PERMISSION_READ
         )
-        deviceIdChar.value = deviceId.toByteArray(StandardCharsets.UTF_8).take(4).toByteArray()
         service.addCharacteristic(deviceIdChar)
 
         // CHAR_HOTSPOT_DATA - NOTIFY + READ (read fallback)
@@ -256,7 +263,7 @@ class GattServer(private val context: Context, private val deviceId: String) {
                         requestId,
                         BluetoothGatt.GATT_SUCCESS,
                         offset,
-                        characteristic.value
+                        deviceId.toByteArray(StandardCharsets.UTF_8).take(4).toByteArray()
                     )
                 }
                 BleConstants.CHAR_APPROVAL_STATUS -> {
