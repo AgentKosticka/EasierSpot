@@ -697,8 +697,8 @@ class HotspotManager(private val context: Context) {
     private fun scoreTetheringMethod(method: Method): Int {
         val params = method.parameterTypes
         return when {
-            params.isNotEmpty() && params[0].name == "android.net.TetheringRequestParcel" -> 100
-            params.isNotEmpty() && params[0] == Int::class.javaPrimitiveType -> 80
+            params.isNotEmpty() && params[0] == Int::class.javaPrimitiveType -> 100
+            params.isNotEmpty() && params[0].name == "android.net.TetheringRequestParcel"-> 50
             else -> 10
         } + params.size
     }
@@ -774,6 +774,7 @@ class HotspotManager(private val context: Context) {
                 }
         }.getOrElse {
             runCatching {
+                @SuppressLint("PrivateApi")
                 val parcelClass = Class.forName("android.net.TetheringRequestParcel")
                 val parcel = parcelClass.getDeclaredConstructor().newInstance()
                 parcelClass.declaredFields.firstOrNull {
