@@ -8,8 +8,10 @@ import android.bluetooth.BluetoothGattCallback
 import android.bluetooth.BluetoothGattCharacteristic
 import android.bluetooth.BluetoothGattDescriptor
 import android.bluetooth.BluetoothProfile
+import android.bluetooth.BluetoothStatusCodes
 import android.content.Context
 import android.content.pm.PackageManager
+import android.os.Build
 import android.util.Log
 import androidx.core.content.ContextCompat
 import androidx.core.content.edit
@@ -174,9 +176,19 @@ class GattClient(private val context: Context) {
             _gattError.value = "Client ID characteristic missing on server"
             return
         }
+
         val clientId = getOrCreateStableClientId()
-        characteristic.value = clientId.toByteArray(StandardCharsets.UTF_8)
-        val started = gatt?.writeCharacteristic(characteristic) == true
+        val clientIdBytes = clientId.toByteArray(StandardCharsets.UTF_8)
+
+        val started = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            gatt?.writeCharacteristic(characteristic, clientIdBytes, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT) == BluetoothStatusCodes.SUCCESS
+        } else {
+            @Suppress("DEPRECATION")
+            characteristic.value = clientIdBytes
+            @Suppress("DEPRECATION")
+            gatt?.writeCharacteristic(characteristic) == true
+        }
+
         if (!started) {
             _gattError.value = "Failed to write client ID characteristic"
         } else {
@@ -236,8 +248,16 @@ class GattClient(private val context: Context) {
             return
         }
 
-        approvalCccd.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
-        if (!gatt!!.writeDescriptor(approvalCccd)) {
+        val writeResult = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            gatt!!.writeDescriptor(approvalCccd, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE) == BluetoothStatusCodes.SUCCESS
+        } else {
+            @Suppress("DEPRECATION")
+            approvalCccd.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+            @Suppress("DEPRECATION")
+            gatt!!.writeDescriptor(approvalCccd)
+        }
+
+        if (!writeResult) {
             _gattError.value = "Failed to write approval CCCD"
         } else {
             Log.d(TAG, "Writing approval CCCD")
@@ -322,13 +342,13 @@ class GattClient(private val context: Context) {
             }
         }
 
-        @Deprecated("Deprecated in Java")
         override fun onCharacteristicRead(
             gatt: BluetoothGatt,
             characteristic: BluetoothGattCharacteristic,
+            value: ByteArray,
             status: Int
         ) {
-            super.onCharacteristicRead(gatt, characteristic, status)
+            super.onCharacteristicRead(gatt, characteristic, value, status)
 
             if (status != BluetoothGatt.GATT_SUCCESS) {
                 _gattError.value = "Characteristic read failed"
@@ -338,15 +358,12 @@ class GattClient(private val context: Context) {
             when (characteristic.uuid) {
                 BleConstants.CHAR_DEVICE_ID -> {
                     Log.d(TAG, "Device ID characteristic read")
-                    val raw = characteristic.value
-                    val serverId = String(raw, StandardCharsets.UTF_8).trim()
+                    val serverId = String(value, StandardCharsets.UTF_8).trim()
                     _serverDeviceId.value = serverId
-                    // Successfully read device ID, connection is established
-                    // Now we wait for hotspot data notification
                     writeClientIdCharacteristic()
                 }
                 BleConstants.CHAR_APPROVAL_STATUS -> {
-                    val statusValue = characteristic.value.firstOrNull()?.toInt() ?: -1
+                    val statusValue = value.firstOrNull()?.toInt() ?: -1
                     Log.d(TAG, "Approval status read: 0x${String.format("%02X", statusValue)}")
                     when (statusValue) {
                         0x01 -> {
@@ -357,7 +374,6 @@ class GattClient(private val context: Context) {
                             readHotspotDataCharacteristic()
                         }
                         0x00 -> {
-                            // Not yet approved - start polling as fallback for missed notifications
                             Log.d(TAG, "Pending approval, starting poll loop...")
                             if (approvalPollJob == null || approvalPollJob?.isActive != true) {
                                 startApprovalPolling()
@@ -369,8 +385,8 @@ class GattClient(private val context: Context) {
                     }
                 }
                 BleConstants.CHAR_HOTSPOT_DATA -> {
-                    if (characteristic.value.isNotEmpty()) {
-                        val credentials = decodeHotspotData(characteristic.value)
+                    if (value.isNotEmpty()) {
+                        val credentials = decodeHotspotData(value)
                         if (credentials != null) {
                             Log.d(TAG, "Received hotspot payload via read for SSID=${credentials.ssid}")
                             stopApprovalPolling()
@@ -384,18 +400,18 @@ class GattClient(private val context: Context) {
             }
         }
 
-        @Deprecated("Deprecated in Java")
         override fun onCharacteristicChanged(
             gatt: BluetoothGatt,
-            characteristic: BluetoothGattCharacteristic
+            characteristic: BluetoothGattCharacteristic,
+            value: ByteArray
         ) {
-            super.onCharacteristicChanged(gatt, characteristic)
-            Log.d(TAG, "onCharacteristicChanged: uuid=${characteristic.uuid}, value size=${characteristic.value?.size ?: 0}")
+            super.onCharacteristicChanged(gatt, characteristic, value)
+            Log.d(TAG, "onCharacteristicChanged: uuid=${characteristic.uuid}, value size=${value.size}")
 
             when (characteristic.uuid) {
                 BleConstants.CHAR_HOTSPOT_DATA -> {
-                    Log.d(TAG, "Received hotspot notification, data size=${characteristic.value?.size ?: 0}")
-                    val credentials = decodeHotspotData(characteristic.value)
+                    Log.d(TAG, "Received hotspot notification, data size=${value.size}")
+                    val credentials = decodeHotspotData(value)
                     if (credentials != null) {
                         Log.d(TAG, "Decoded hotspot credentials: SSID=${credentials.ssid}")
                         stopApprovalPolling()
@@ -405,7 +421,7 @@ class GattClient(private val context: Context) {
                     }
                 }
                 BleConstants.CHAR_APPROVAL_STATUS -> {
-                    val status = characteristic.value.firstOrNull()?.toInt() ?: -1
+                    val status = value.firstOrNull()?.toInt() ?: -1
                     Log.d(TAG, "Received approval notification: 0x${String.format("%02X", status)}")
                     when (status) {
                         0x01 -> {
@@ -443,8 +459,15 @@ class GattClient(private val context: Context) {
                     ?.getCharacteristic(BleConstants.CHAR_HOTSPOT_DATA)
                 val hotspotCccd = hotspotChar?.getDescriptor(BleConstants.CLIENT_CONFIG_DESCRIPTOR_UUID)
                 if (hotspotCccd != null) {
-                    hotspotCccd.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
-                    if (!gatt.writeDescriptor(hotspotCccd)) {
+                    val writeResult = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        gatt.writeDescriptor(hotspotCccd, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE) == BluetoothStatusCodes.SUCCESS
+                    } else {
+                        @Suppress("DEPRECATION")
+                        hotspotCccd.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+                        @Suppress("DEPRECATION")
+                        gatt.writeDescriptor(hotspotCccd)
+                    }
+                    if (!writeResult) {
                         _gattError.value = "Failed to write hotspot CCCD"
                     } else {
                         pendingHotspotCccdWrite = true
