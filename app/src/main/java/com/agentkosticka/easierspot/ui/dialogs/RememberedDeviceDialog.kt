@@ -3,7 +3,6 @@ package com.agentkosticka.easierspot.ui.dialogs
 import android.app.Dialog
 import android.content.Context
 import android.os.Bundle
-import android.view.LayoutInflater
 import android.widget.ArrayAdapter
 import android.widget.AutoCompleteTextView
 import android.widget.Button
@@ -57,7 +56,7 @@ class RememberedDeviceDialog : DialogFragment() {
         val currentNickname = arguments?.getString(ARG_NICKNAME)
         val currentPolicy = arguments?.getString(ARG_APPROVAL_POLICY) ?: RememberedServer.APPROVAL_POLICY_ASK
 
-        val view = LayoutInflater.from(requireContext()).inflate(R.layout.dialog_remembered_device, null)
+        val view = layoutInflater.inflate(R.layout.dialog_remembered_device, null)
         val titleView = view.findViewById<TextView>(R.id.tv_dialog_title)
         val nicknameInput = view.findViewById<EditText>(R.id.et_nickname)
         val approvalInput = view.findViewById<AutoCompleteTextView>(R.id.actv_approval_policy)

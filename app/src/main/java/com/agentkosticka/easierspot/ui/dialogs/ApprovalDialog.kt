@@ -64,7 +64,7 @@ class ApprovalDialog : DialogFragment() {
             .takeUnless { it == getString(R.string.approval_identity_unknown) }
         val joinTarget = nickname ?: normalizedDeviceName ?: normalizedDeviceId
 
-        val view = LayoutInflater.from(requireContext()).inflate(R.layout.dialog_approval, null)
+        val view = layoutInflater.inflate(R.layout.dialog_approval, null)
 
         val titleTextView = view.findViewById<TextView>(R.id.tv_approval_title)
         val primaryIdentityTextView = view.findViewById<TextView>(R.id.tv_primary_identity)
