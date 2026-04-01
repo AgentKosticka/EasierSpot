@@ -570,9 +570,15 @@ class HotspotManager(private val context: Context) {
         val packageManager = context.packageManager
         for (candidate in candidates) {
             candidate.flags = Intent.FLAG_ACTIVITY_NEW_TASK
-            if (candidate.resolveActivity(packageManager) != null) {
-                return candidate
+
+            val canResolve = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                packageManager.resolveActivity(candidate, PackageManager.ResolveInfoFlags.of(0)) != null
+            } else {
+                @SuppressLint("QueryPermissionsNeeded")
+                candidate.resolveActivity(packageManager) != null
             }
+
+            if (canResolve) return candidate
         }
 
         return Intent(Settings.ACTION_SETTINGS).apply {
