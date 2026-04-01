@@ -29,42 +29,49 @@ object LogUtils {
      */
     var DIAGNOSTIC_MODE: Boolean = false
 
+    @Suppress("unused")
     fun v(tag: String, message: String) {
         if (LOG_LEVEL <= Level.VERBOSE) {
             Log.v(tag, message)
         }
     }
 
+    @Suppress("unused")
     fun d(tag: String, message: String) {
         if (LOG_LEVEL <= Level.DEBUG) {
             Log.d(tag, message)
         }
     }
 
+    @Suppress("unused")
     fun i(tag: String, message: String) {
         if (LOG_LEVEL <= Level.INFO) {
             Log.i(tag, message)
         }
     }
 
+    @Suppress("unused")
     fun w(tag: String, message: String) {
         if (LOG_LEVEL <= Level.WARN) {
             Log.w(tag, message)
         }
     }
 
+    @Suppress("unused")
     fun w(tag: String, message: String, throwable: Throwable) {
         if (LOG_LEVEL <= Level.WARN) {
             Log.w(tag, message, throwable)
         }
     }
 
+    @Suppress("unused")
     fun e(tag: String, message: String) {
         if (LOG_LEVEL <= Level.ERROR) {
             Log.e(tag, message)
         }
     }
 
+    @Suppress("unused")
     fun e(tag: String, message: String, throwable: Throwable) {
         if (LOG_LEVEL <= Level.ERROR) {
             Log.e(tag, message, throwable)
