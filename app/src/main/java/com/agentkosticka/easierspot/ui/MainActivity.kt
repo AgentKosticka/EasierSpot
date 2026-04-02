@@ -3,7 +3,6 @@ package com.agentkosticka.easierspot.ui
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.os.Bundle
-import android.util.Log
 import android.view.View
 import android.widget.LinearLayout
 import android.widget.TextView
@@ -26,9 +25,6 @@ import kotlinx.coroutines.withContext
 import androidx.core.net.toUri
 
 class MainActivity : AppCompatActivity() {
-    companion object {
-        private const val TAG = "MainActivity"
-    }
     private val mainScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private lateinit var updateBanner: LinearLayout
     private lateinit var updateText: TextView
