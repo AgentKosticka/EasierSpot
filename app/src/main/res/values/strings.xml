@@ -1,15 +1,59 @@
 <resources>
+    <!-- App-wide -->
     <string name="app_name">Easier Spot</string>
-    <string name="title_settings">Settings</string>
-    <string name="title_diagnostics">Diagnostics</string>
     <string name="action_settings">Settings</string>
     <string name="action_diagnostics">Diagnostics</string>
+
+    <!-- MainActivity -->
+    <string name="easier_spot">Easier Spot</string>
+    <string name="select_mode">Select Mode</string>
+    <string name="connect_to_hotspot_client">Connect to Hotspot (Client)</string>
+    <string name="share_hotspot_server">Share Hotspot (Server)</string>
+
+    <!-- MainActivity - update banner -->
+    <string name="update_available_icon">!</string>
+    <string name="update_available_default">A newer app update is available.</string>
+    <string name="update_available_with_version">A newer update (v%1$s) is available. Tap to open release page.</string>
+    <string name="update_open_failed">Could not open release page.</string>
+
+    <!-- PermissionsActivity -->
+    <string name="permissions_title">Permissions</string>
+    <string name="permissions_heading">Permissions needed</string>
+    <string name="permissions_intro">Easier Spot needs these permissions to scan, connect, and share hotspot credentials securely. You can grant and read about every permission below.</string>
+    <string name="permissions_grant_required">Grant all mandatory permissions</string>
+    <string name="permissions_continue">Continue to app</string>
+    <string name="permissions_continue_locked">Grant required permissions to continue</string>
+    <string name="permission_button_grant">Grant</string>
+    <string name="permission_button_granted">Granted</string>
+    <string name="permissions_button_external">Managed externally</string>
+    <string name="permissions_button_shizuku_optional">Optional</string>
+    <string name="permissions_group_ble_title">Bluetooth permissions</string>
+    <string name="permissions_group_ble_desc">Used for BLE scanning, pairing, and advertising during hotspot sharing.</string>
+    <string name="permissions_item_ble_group">Bluetooth Scan, Connect and Advertise</string>
+    <string name="permissions_group_location_title">Location permissions</string>
+    <string name="permissions_group_location_desc">Android requires location access for BLE discovery and nearby device operations. We do not use your GPS.</string>
+    <string name="permissions_item_location_group">Fine Location</string>
+    <string name="permissions_group_notifications_title">Notifications</string>
+    <string name="permissions_group_notifications_desc">Needed for foreground service status and approval prompts. Only the device acting as a server needs this permission.</string>
+    <string name="permissions_item_notifications">Post Notifications</string>
+    <string name="permissions_group_shizuku_title">Shizuku integration</string>
+    <string name="permissions_group_shizuku_desc">Used for privileged hotspot controls in server mode. Used for fetching hotspot config and turning it on in the background. Only the device acting as a server needs this permission</string>
+    <string name="permissions_item_shizuku">Shizuku</string>
+
+    <!-- SettingsActivity -->
+    <string name="title_settings">Settings</string>
     <string name="theme_mode_label">Theme mode</string>
     <string name="theme_mode_system">System</string>
     <string name="theme_mode_light">Light</string>
     <string name="theme_mode_dark">Dark</string>
+    <string name="view_permissions">View permissions</string>
+
+    <!-- DiagnosticsActivity -->
+    <string name="title_diagnostics">Diagnostics</string>
     <string name="diagnostics_open">Open diagnostics</string>
     <string name="diagnostics_run_hotspot_test">Run hotspot test</string>
+
+    <!-- ClientActivity -->
     <string name="connection_status_title">Connection status</string>
     <string name="connection_cancel">Cancel</string>
     <string name="client_screen_title">Connect to Hotspot</string>
@@ -19,6 +63,8 @@
     <string name="client_scan_stop">Stop Scan</string>
     <string name="client_devices_title">Available devices</string>
     <string name="client_devices_hint">Select a server from the list below to begin pairing.</string>
+
+    <!-- Remembered devices / approval metadata -->
     <string name="remembered_last_approved_seconds_ago">Last approved: %1$ds ago</string>
     <string name="remembered_last_approved_never">Last approved: never</string>
     <string name="remembered_meta_with_id">ID: %1$s • %2$s</string>
@@ -27,6 +73,8 @@
     <string name="approval_policy_approved">Approve</string>
     <string name="approval_policy_ask">Ask</string>
     <string name="approval_policy_denied">Deny</string>
+
+    <!-- RememberedDeviceDialog -->
     <string name="remembered_device_dialog_title">Manage %1$s</string>
     <string name="remembered_device_nickname_label">Nickname</string>
     <string name="remembered_device_nickname_hint">Optional nickname</string>
@@ -37,6 +85,8 @@
     <string name="remembered_device_save">Save</string>
     <string name="remembered_device_updated">Device preferences saved</string>
     <string name="remembered_device_removed">Removed remembered device</string>
+
+    <!-- ApprovalDialog -->
     <string name="approval_title_new_device">New device wants to connect</string>
     <string name="approval_title_existing_device">Device %1$s wants to join</string>
     <string name="approval_identity_unknown">Unknown</string>
@@ -44,16 +94,11 @@
     <string name="approval_identity_id_line">ID: %1$s</string>
     <string name="approval_action_deny">Deny</string>
     <string name="approval_action_approve">Approve</string>
+
+    <!-- ServerActivity -->
     <string name="remembered_devices">Remembered Devices</string>
-    <string name="easier_spot">Easier Spot</string>
-    <string name="select_mode">Select Mode</string>
-    <string name="connect_to_hotspot_client">Connect to Hotspot (Client)</string>
-    <string name="share_hotspot_server">Share Hotspot (Server)</string>
     <string name="start_sharing">Start Sharing</string>
     <string name="share_your_hotspot">Share Your Hotspot</string>
     <string name="stop_sharing">Stop Sharing</string>
-    <string name="update_available_icon">!</string>
-    <string name="update_available_default">A newer app update is available.</string>
-    <string name="update_available_with_version">A newer update (v%1$s) is available. Tap to open release page.</string>
-    <string name="update_open_failed">Could not open release page.</string>
+    <string name="server_notifications_required_message">Notifications permission is required for server mode.</string>
 </resources>

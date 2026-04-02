@@ -30,9 +30,16 @@
 
         <Button
             android:id="@+id/btn_open_diagnostics"
-            android:layout_width="wrap_content"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="@string/diagnostics_open" />
+            android:text="@string/diagnostics_open"
+            android:layout_marginBottom="12dp" />
+
+        <Button
+            android:id="@+id/btn_view_permissions"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/view_permissions" />
     </LinearLayout>
 
 </LinearLayout>

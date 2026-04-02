@@ -8,6 +8,7 @@ import android.widget.Spinner
 import androidx.appcompat.app.AppCompatActivity
 import com.agentkosticka.easierspot.R
 import com.agentkosticka.easierspot.ui.diagnostics.DiagnosticsActivity
+import com.agentkosticka.easierspot.ui.permissions.PermissionsActivity
 
 class SettingsActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -17,6 +18,7 @@ class SettingsActivity : AppCompatActivity() {
 
         val modeSpinner = findViewById<Spinner>(R.id.spinner_theme_mode)
         val diagnosticsButton = findViewById<Button>(R.id.btn_open_diagnostics)
+        val viewPermissionsButton = findViewById<Button>(R.id.btn_view_permissions)
 
         val labels = listOf(
             getString(R.string.theme_mode_system),
@@ -55,6 +57,15 @@ class SettingsActivity : AppCompatActivity() {
 
         diagnosticsButton.setOnClickListener {
             startActivity(Intent(this, DiagnosticsActivity::class.java))
+        }
+
+        viewPermissionsButton.setOnClickListener {
+            startActivity(
+                Intent(this, PermissionsActivity::class.java).putExtra(
+                    PermissionsActivity.EXTRA_VIEW_ONLY,
+                    true
+                )
+            )
         }
     }
 }

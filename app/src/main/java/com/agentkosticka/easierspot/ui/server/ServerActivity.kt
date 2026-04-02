@@ -2,6 +2,7 @@ package com.agentkosticka.easierspot.ui.server
 
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothManager
+import android.Manifest
 import android.content.BroadcastReceiver
 import android.content.ComponentName
 import android.content.Context
@@ -9,6 +10,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.ServiceConnection
 import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import android.os.IBinder
 import android.widget.Button
@@ -59,6 +61,18 @@ class ServerActivity : AppCompatActivity(), ApprovalDialog.ApprovalListener, Rem
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
             if (result.resultCode == RESULT_OK) {
                 Toast.makeText(this, "Bluetooth enabled. Tap Start Sharing again.", Toast.LENGTH_SHORT).show()
+            }
+        }
+    private val notificationPermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            if (granted) {
+                startSharing()
+            } else {
+                Toast.makeText(
+                    this,
+                    getString(R.string.server_notifications_required_message),
+                    Toast.LENGTH_LONG
+                ).show()
             }
         }
     private val approvalReceiver = object : BroadcastReceiver() {
@@ -233,6 +247,10 @@ class ServerActivity : AppCompatActivity(), ApprovalDialog.ApprovalListener, Rem
     }
 
     private fun startSharing() {
+        if (!ensureNotificationPermissionForServer()) {
+            return
+        }
+
         // Check if Bluetooth is enabled
         try {
             val bluetoothManager = getSystemService(BLUETOOTH_SERVICE) as BluetoothManager
@@ -293,6 +311,23 @@ class ServerActivity : AppCompatActivity(), ApprovalDialog.ApprovalListener, Rem
             LogUtils.e(TAG, "Error in startSharing", e)
             Toast.makeText(this, "Error: ${e.message}", Toast.LENGTH_LONG).show()
         }
+    }
+
+    private fun ensureNotificationPermissionForServer(): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+            return true
+        }
+
+        val hasPermission = ContextCompat.checkSelfPermission(
+            this,
+            Manifest.permission.POST_NOTIFICATIONS
+        ) == PackageManager.PERMISSION_GRANTED
+        if (hasPermission) {
+            return true
+        }
+
+        notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        return false
     }
 
     private fun stopSharing() {
