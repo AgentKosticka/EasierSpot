@@ -579,7 +579,7 @@ class BleHotspotService : Service() {
         return NotificationCompat.Builder(this, SERVICE_CHANNEL_ID)
             .setContentTitle("Hotspot sharing active")
             .setContentText("Click here to open app")
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setSmallIcon(R.drawable.ic_launcher_notification)
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
