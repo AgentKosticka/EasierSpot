@@ -52,4 +52,8 @@
     <string name="start_sharing">Start Sharing</string>
     <string name="share_your_hotspot">Share Your Hotspot</string>
     <string name="stop_sharing">Stop Sharing</string>
+    <string name="update_available_icon">!</string>
+    <string name="update_available_default">A newer app update is available.</string>
+    <string name="update_available_with_version">A newer update (v%1$s) is available. Tap to open release page.</string>
+    <string name="update_open_failed">Could not open release page.</string>
 </resources>

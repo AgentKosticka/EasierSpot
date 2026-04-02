@@ -12,6 +12,9 @@
     <color name="green_on_background">#102014</color>
     <color name="green_surface">#F6FFF6</color>
     <color name="green_on_surface">#102014</color>
+    <color name="update_banner_background">#FFF3CD</color>
+    <color name="update_banner_icon">#7A5A00</color>
+    <color name="update_banner_text">#4A3B00</color>
 
     <color name="ic_launcher_background">#66BB6A</color>
 </resources>
