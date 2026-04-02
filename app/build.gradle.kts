@@ -37,6 +37,7 @@ android {
     
     buildFeatures {
         aidl = true
+        buildConfig = true
     }
 
     lint {
@@ -67,6 +68,9 @@ dependencies {
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)
     ksp(libs.androidx.room.compiler)
+    
+    // Preferences
+    implementation(libs.androidx.preference.ktx)
     
     // Testing
     testImplementation(libs.junit)

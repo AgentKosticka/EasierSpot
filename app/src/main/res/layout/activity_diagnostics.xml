@@ -5,28 +5,130 @@
     android:orientation="vertical"
     android:fitsSystemWindows="true">
 
-    <LinearLayout
+    <ScrollView
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:orientation="vertical"
-        android:paddingTop="16dp"
-        android:paddingBottom="16dp"
-        android:paddingStart="@dimen/padding_horizontal_safe"
-        android:paddingEnd="@dimen/padding_horizontal_safe">
+        android:fillViewport="true">
 
-        <TextView
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="@string/title_diagnostics"
-            android:textStyle="bold"
-            android:textSize="22sp"
-            android:layout_marginBottom="16dp" />
+            android:orientation="vertical"
+            android:paddingTop="16dp"
+            android:paddingBottom="16dp"
+            android:paddingStart="@dimen/padding_horizontal_safe"
+            android:paddingEnd="@dimen/padding_horizontal_safe">
 
-        <Button
-            android:id="@+id/btn_run_hotspot_diagnostics"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="@string/diagnostics_run_hotspot_test" />
-    </LinearLayout>
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/title_diagnostics"
+                android:textStyle="bold"
+                android:textSize="22sp"
+                android:layout_marginBottom="16dp" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/diagnostics_subtitle"
+                android:textSize="14sp"
+                android:layout_marginBottom="16dp" />
+
+            <!-- System Information Cards -->
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/diagnostics_system_information"
+                android:textStyle="bold"
+                android:textSize="16sp"
+                android:layout_marginBottom="8dp" />
+
+            <LinearLayout
+                android:id="@+id/container_diagnostic_cards"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:layout_marginBottom="24dp">
+                <!-- Cards will be added programmatically -->
+            </LinearLayout>
+
+            <!-- System Tests Section -->
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/diagnostics_section_tests"
+                android:textStyle="bold"
+                android:textSize="16sp"
+                android:layout_marginBottom="8dp" />
+
+            <Button
+                android:id="@+id/btn_run_hotspot_diagnostics"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/diagnostics_run_hotspot_test"
+                android:layout_marginBottom="8dp" />
+
+            <Button
+                android:id="@+id/btn_run_ble_test"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/diagnostics_run_ble_test"
+                android:layout_marginBottom="8dp" />
+
+            <Button
+                android:id="@+id/btn_test_connectivity"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/diagnostics_test_connectivity"
+                android:layout_marginBottom="24dp" />
+
+            <!-- Data Management Section -->
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/diagnostics_section_data"
+                android:textStyle="bold"
+                android:textSize="16sp"
+                android:layout_marginBottom="8dp" />
+
+            <Button
+                android:id="@+id/btn_view_database"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/diagnostics_view_database"
+                android:layout_marginBottom="8dp" />
+
+            <Button
+                android:id="@+id/btn_clear_cache"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/diagnostics_clear_cache"
+                android:layout_marginBottom="8dp" />
+
+            <Button
+                android:id="@+id/btn_reset_settings"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/diagnostics_reset_settings"
+                android:layout_marginBottom="24dp" />
+
+            <!-- Export Section -->
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/diagnostics_section_export"
+                android:textStyle="bold"
+                android:textSize="16sp"
+                android:layout_marginBottom="8dp" />
+
+            <Button
+                android:id="@+id/btn_export_logs"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/diagnostics_export_logs"
+                android:layout_marginBottom="16dp" />
+
+        </LinearLayout>
+    </ScrollView>
 
 </LinearLayout>

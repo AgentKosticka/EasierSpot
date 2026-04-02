@@ -51,7 +51,71 @@
     <!-- DiagnosticsActivity -->
     <string name="title_diagnostics">Diagnostics</string>
     <string name="diagnostics_open">Open diagnostics</string>
-    <string name="diagnostics_run_hotspot_test">Run hotspot test</string>
+    <string name="diagnostics_subtitle">Test system capabilities and manage app data</string>
+    
+    <!-- Diagnostics Sections -->
+    <string name="diagnostics_section_tests">System Tests</string>
+    <string name="diagnostics_section_data">Data Management</string>
+    <string name="diagnostics_section_export">Export &amp; Logs</string>
+    
+    <!-- Diagnostics Buttons -->
+    <string name="diagnostics_run_hotspot_test">Test Hotspot Access</string>
+    <string name="diagnostics_run_ble_test">Test BLE Capabilities</string>
+    <string name="diagnostics_test_connectivity">Test Network Connectivity</string>
+    <string name="diagnostics_view_database">View Database</string>
+    <string name="diagnostics_clear_cache">Clear Cache</string>
+    <string name="diagnostics_reset_settings">Reset Settings</string>
+    <string name="diagnostics_export_logs">Export Diagnostic Logs</string>
+    
+    <!-- BLE Test Dialog -->
+    <string name="ble_test_title">BLE Test Results</string>
+    <string name="ble_test_running">Running BLE tests…</string>
+    <string name="ble_test_permissions_missing">BLE permissions not granted</string>
+    
+    <!-- Connectivity Test Dialog -->
+    <string name="connectivity_test_title">Connectivity Test</string>
+    <string name="connectivity_test_running">Testing connectivity…</string>
+    
+    <!-- Database Viewer Dialog -->
+    <string name="database_viewer_title">Remembered Devices</string>
+    <string name="database_viewer_empty">No remembered devices</string>
+    <string name="database_viewer_clear_all">Clear All</string>
+    <string name="database_viewer_clear_confirm_title">Clear All Devices?</string>
+    <string name="database_viewer_clear_confirm_message">This will remove all remembered devices and their approval settings. This cannot be undone.</string>
+    <string name="database_viewer_cleared">All remembered devices cleared</string>
+    
+    <!-- Cache Clear Dialog -->
+    <string name="cache_clear_confirm_title">Clear Cache?</string>
+    <string name="cache_clear_confirm_message">This will clear app cache, temporary files, and update check cache. This cannot be undone.</string>
+    <string name="cache_cleared_success">Cache cleared successfully</string>
+    <string name="cache_cleared_partial">Cache cleared: %1$d</string>
+    
+    <!-- Settings Reset Dialog -->
+    <string name="settings_reset_confirm_title">Reset Settings?</string>
+    <string name="settings_reset_confirm_message">This will reset all app preferences to their default values. This cannot be undone.</string>
+    <string name="settings_reset_success">Settings reset to defaults</string>
+    
+    <!-- Export Logs -->
+    <string name="export_logs_title">Export Diagnostic Logs</string>
+    <string name="export_logs_success">Logs exported</string>
+    <string name="export_logs_failed">Failed to export logs</string>
+    <string name="export_logs_share_title">Share Diagnostic Logs</string>
+    
+    <!-- Common -->
+    <string name="action_confirm">Confirm</string>
+    <string name="action_cancel">Cancel</string>
+    <string name="action_close">Close</string>
+    <string name="diagnostics_card_ble_status">BLE Status</string>
+    <string name="diagnostics_card_shizuku_status">Shizuku Status</string>
+    <string name="diagnostics_card_hotspot_status">Hotspot Status</string>
+    <string name="diagnostics_card_database_info">Database Info</string>
+    <string name="diagnostics_card_app_info">App Info</string>
+    <string name="diagnostics_card_system_info">System Info</string>
+    <string name="diagnostics_tools_title">Diagnostic Tools</string>
+    <string name="diagnostics_status_loading">Loading…</string>
+    <string name="diagnostics_expand">Expand</string>
+    <string name="diagnostics_collapse">Collapse</string>
+    <string name="diagnostics_system_information">System Information</string>
 
     <!-- ClientActivity -->
     <string name="connection_status_title">Connection status</string>
@@ -101,4 +165,81 @@
     <string name="share_your_hotspot">Share Your Hotspot</string>
     <string name="stop_sharing">Stop Sharing</string>
     <string name="server_notifications_required_message">Notifications permission is required for server mode.</string>
+
+    <!-- Preference Categories -->
+    <string name="pref_category_general">General</string>
+    <string name="pref_category_ble_network">BLE &amp; Network</string>
+    <string name="pref_category_server_mode">Server Mode</string>
+    <string name="pref_category_advanced">Advanced</string>
+
+    <!-- General Preferences -->
+    <string name="pref_theme_mode_title">Theme</string>
+    <string name="pref_theme_mode_summary">Choose app appearance</string>
+    <string name="pref_update_check_title">Check for updates</string>
+    <string name="pref_update_check_summary">Automatically check for new app versions</string>
+    <string name="pref_app_language_title">App language</string>
+    <string name="pref_app_language_summary">Choose language for app text</string>
+    <string name="pref_app_language_system">System default</string>
+    <string name="pref_app_language_english">English</string>
+    <string name="pref_diagnostics_summary">Run diagnostic tests and view system information</string>
+    <string name="pref_view_permissions_summary">Review and manage app permissions</string>
+
+    <!-- Notification Preferences -->
+
+    <!-- BLE/Network Preferences -->
+    <string name="pref_ble_advertising_interval_title">BLE advertising interval</string>
+    <string name="pref_ble_advertising_interval_summary">How often to broadcast server presence</string>
+    <string name="pref_ble_advertising_interval_slow">Slow (1000ms) - Better battery life</string>
+    <string name="pref_ble_advertising_interval_balanced">Balanced (250ms) - Recommended</string>
+    <string name="pref_ble_advertising_interval_frequent">Frequent (100ms) - Faster discovery</string>
+    <string name="pref_broadcast_strength_title">BLE broadcast strength</string>
+    <string name="pref_broadcast_strength_summary">Transmit power used for BLE advertising</string>
+    <string name="pref_broadcast_strength_low">Low - Best battery life</string>
+    <string name="pref_broadcast_strength_medium">Medium - Recommended</string>
+    <string name="pref_broadcast_strength_high">High - Best range</string>
+    <string name="pref_scan_timeout_title">Scan timeout</string>
+    <string name="pref_scan_timeout_summary">Client scan duration: Currently %1$d seconds</string>
+    <string name="pref_scan_timeout_summary_format">Client scan duration: %1$d seconds</string>
+    <string name="pref_auto_retry_title">Auto-retry connections</string>
+    <string name="pref_auto_retry_summary">Automatically retry failed BLE connections</string>
+
+    <!-- Server Mode Preferences -->
+    <string name="pref_default_approval_policy_title">Default approval policy</string>
+    <string name="pref_default_approval_policy_summary">How to handle new device connection requests</string>
+    <string name="pref_default_approval_policy_ask">Ask - Prompt for each new device</string>
+    <string name="pref_default_approval_policy_approve">Approve - Auto-approve all devices</string>
+    <string name="pref_default_approval_policy_deny">Deny - Auto-deny all devices</string>
+    <string name="pref_hotspot_refresh_interval_title">Hotspot refresh interval</string>
+    <string name="pref_hotspot_refresh_interval_summary">Refresh hotspot credentials every %1$d seconds</string>
+    <string name="pref_hotspot_refresh_interval_summary_format">Refresh hotspot credentials every %1$d seconds</string>
+
+    <!-- Advanced Preferences -->
+    <string name="pref_debug_logging_title">Debug logging</string>
+    <string name="pref_debug_logging_summary">Enable verbose logging (may impact performance)</string>
+    <string name="pref_battery_optimization_title">Battery optimization</string>
+    <string name="pref_battery_optimization_summary">Manage battery optimization settings for background operation</string>
+    <string name="pref_help_about_title">Help &amp; About</string>
+    <string name="pref_help_about_summary">App information and settings guide</string>
+
+    <!-- Help & About Dialog -->
+    <string name="help_about_dialog_title">About Easier Spot</string>
+    <string name="help_about_dialog_message">
+        <![CDATA[
+        <b>Easier Spot v%1$s</b><br/><br/>
+        <b>What is Easier Spot?</b><br/>
+        An Android app that shares Wi-Fi hotspot credentials between devices over Bluetooth Low Energy (BLE).<br/><br/>
+        <b>Server Mode Requirements:</b><br/>
+        • Notifications permission<br/>
+        • Shizuku for privileged hotspot access<br/><br/>
+        <b>Need Help?</b><br/>
+        Visit Diagnostics to troubleshoot Shizuku and hotspot issues. Or you can visit our GitHub repo for reporting issues or further help.
+        ]]>
+    </string>
+    <string name="help_about_dialog_ok">Got it</string>
+
+    <!-- Input Validation -->
+    <string name="validation_error_scan_timeout">Scan timeout must be between 5 and 300 seconds (5 minutes)</string>
+    <string name="validation_error_hotspot_refresh">Hotspot refresh interval must be between 5 and 600 seconds (10 minutes)</string>
+    <string name="validation_error_invalid_number">Please enter a valid number</string>
+    <string name="validation_error_generic">Unable to show this message</string>
 </resources>

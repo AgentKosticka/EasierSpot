@@ -17,6 +17,7 @@ import android.net.wifi.WifiNetworkSuggestion
 import android.os.Bundle
 import android.provider.Settings
 import android.util.Log
+import android.view.WindowManager
 import android.widget.Button
 import android.widget.ListView
 import android.widget.SimpleAdapter
@@ -30,6 +31,7 @@ import com.agentkosticka.easierspot.R
 import com.agentkosticka.easierspot.ble.client.BleScanner
 import com.agentkosticka.easierspot.ble.client.GattClient
 import com.agentkosticka.easierspot.data.model.HotspotCredentials
+import com.agentkosticka.easierspot.ui.settings.AppPreferences
 import com.agentkosticka.easierspot.ui.settings.SettingsActivity
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.TimeoutCancellationException
@@ -63,7 +65,6 @@ class ClientActivity : AppCompatActivity() {
     private var addNetworkStabilityCredentials: HotspotCredentials? = null
     private var addNetworkFlowStartTime: Long = 0L
     private var addNetworkRetryCount = 0
-    private val maxAddNetworkRetries = 1
     private val enableBluetoothLauncher =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
             if (result.resultCode == RESULT_OK) {
@@ -134,13 +135,22 @@ class ClientActivity : AppCompatActivity() {
             }
         }
 
+        lifecycleScope.launch {
+            bleScanner.isScanning.collect { scanning ->
+                scanButton.text = if (scanning) {
+                    getString(R.string.client_scan_stop)
+                } else {
+                    getString(R.string.client_scan_start)
+                }
+            }
+        }
+
         // Observe scan errors
         lifecycleScope.launch {
             bleScanner.scanError.collect { error ->
                 if (error != null) {
                     Log.e(TAG, "Scan error: $error")
                     Toast.makeText(this@ClientActivity, error, Toast.LENGTH_LONG).show()
-                    scanButton.text = getString(R.string.client_scan_start)
                 }
             }
         }
@@ -256,6 +266,18 @@ class ClientActivity : AppCompatActivity() {
             Log.d(TAG, "Stopping scan...")
             scanButton.text = getString(R.string.client_scan_start)
             bleScanner.stopScan()
+        }
+    }
+
+    private fun getMaxAddNetworkRetries(): Int {
+        return if (AppPreferences.isAutoRetryEnabled(this)) 1 else 0
+    }
+
+    private fun applyKeepScreenOnPreference() {
+        if (AppPreferences.isKeepScreenOnEnabled(this)) {
+            window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        } else {
+            window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         }
     }
 
@@ -524,6 +546,7 @@ class ClientActivity : AppCompatActivity() {
                                     Log.w(TAG, "StabilityGate: FAILED for ${credentials.ssid}; current SSID=$stableSsid")
                                     
                                     // Auto-retry on first-time disconnect (when SSID becomes unknown)
+                                    val maxAddNetworkRetries = getMaxAddNetworkRetries()
                                     if (stableSsid == "<unknown ssid>" && addNetworkRetryCount < maxAddNetworkRetries) {
                                         Log.w(TAG, "StabilityGate: First connection attempt failed with unknown SSID, retrying... (attempt ${addNetworkRetryCount + 1}/$maxAddNetworkRetries)")
                                         addNetworkRetryCount++
@@ -540,6 +563,7 @@ class ClientActivity : AppCompatActivity() {
                                         }
                                     } else {
                                         // Either not unknown SSID or retry exhausted
+                                        val maxAddNetworkRetries = getMaxAddNetworkRetries()
                                         if (addNetworkRetryCount >= maxAddNetworkRetries) {
                                             Log.w(TAG, "StabilityGate: Retry limit reached for ${credentials.ssid}")
                                         }
@@ -790,6 +814,7 @@ class ClientActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        applyKeepScreenOnPreference()
         Log.d(TAG, "onResume: pendingCredentials=${pendingCredentials?.ssid}")
         val pending = pendingCredentials ?: return
         val wifiManager = applicationContext.getSystemService(WIFI_SERVICE) as WifiManager
@@ -819,6 +844,11 @@ class ClientActivity : AppCompatActivity() {
         // NOTE: We don't tear down network state here. The connection process must survive
         // activity stop events (e.g., when system dialog appears or user switches to another app).
         Log.d(TAG, "onStop: addNetworkStabilityCredentials=${addNetworkStabilityCredentials?.ssid}, awaitingAddNetworkConnectionCredentials=${awaitingAddNetworkConnectionCredentials?.ssid}")
+    }
+
+    override fun onStart() {
+        super.onStart()
+        applyKeepScreenOnPreference()
     }
 
     private fun registerSuggestionPostConnectReceiver() {

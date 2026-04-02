@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- BLE Advertising Interval -->
+    <string-array name="ble_advertising_interval_entries">
+        <item>@string/pref_ble_advertising_interval_slow</item>
+        <item>@string/pref_ble_advertising_interval_balanced</item>
+        <item>@string/pref_ble_advertising_interval_frequent</item>
+    </string-array>
+
+    <string-array name="ble_advertising_interval_values">
+        <item>slow</item>
+        <item>balanced</item>
+        <item>frequent</item>
+    </string-array>
+
+    <!-- BLE Broadcast Strength -->
+    <string-array name="broadcast_strength_entries">
+        <item>@string/pref_broadcast_strength_low</item>
+        <item>@string/pref_broadcast_strength_medium</item>
+        <item>@string/pref_broadcast_strength_high</item>
+    </string-array>
+
+    <string-array name="broadcast_strength_values">
+        <item>low</item>
+        <item>medium</item>
+        <item>high</item>
+    </string-array>
+
+    <!-- Theme Mode -->
+    <string-array name="theme_mode_entries">
+        <item>@string/theme_mode_system</item>
+        <item>@string/theme_mode_light</item>
+        <item>@string/theme_mode_dark</item>
+    </string-array>
+
+    <string-array name="theme_mode_values">
+        <item>system</item>
+        <item>light</item>
+        <item>dark</item>
+    </string-array>
+
+    <!-- App Language -->
+    <string-array name="app_language_entries">
+        <item>@string/pref_app_language_system</item>
+        <item>@string/pref_app_language_english</item>
+    </string-array>
+
+    <string-array name="app_language_values">
+        <item>system</item>
+        <item>en</item>
+    </string-array>
+
+    <!-- Approval Policy -->
+    <string-array name="approval_policy_entries">
+        <item>@string/pref_default_approval_policy_ask</item>
+        <item>@string/pref_default_approval_policy_approve</item>
+        <item>@string/pref_default_approval_policy_deny</item>
+    </string-array>
+
+    <string-array name="approval_policy_values">
+        <item>ask</item>
+        <item>approve</item>
+        <item>deny</item>
+    </string-array>
+</resources>

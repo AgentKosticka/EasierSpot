@@ -13,6 +13,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.os.IBinder
+import android.view.WindowManager
 import android.widget.Button
 import android.widget.ImageButton
 import android.widget.ListView
@@ -28,6 +29,7 @@ import com.agentkosticka.easierspot.data.model.RememberedServer
 import com.agentkosticka.easierspot.service.BleHotspotService
 import com.agentkosticka.easierspot.ui.dialogs.ApprovalDialog
 import com.agentkosticka.easierspot.ui.dialogs.RememberedDeviceDialog
+import com.agentkosticka.easierspot.ui.settings.AppPreferences
 import com.agentkosticka.easierspot.ui.settings.SettingsActivity
 import com.agentkosticka.easierspot.util.LogUtils
 import kotlinx.coroutines.launch
@@ -265,7 +267,7 @@ class ServerActivity : AppCompatActivity(), ApprovalDialog.ApprovalListener, Rem
                 Toast.makeText(this, "Please enable Bluetooth first", Toast.LENGTH_LONG).show()
                 val hasConnectPermission = ContextCompat.checkSelfPermission(
                     this,
-                    android.Manifest.permission.BLUETOOTH_CONNECT
+                    Manifest.permission.BLUETOOTH_CONNECT
                 ) == PackageManager.PERMISSION_GRANTED
                 if (!hasConnectPermission) {
                     Toast.makeText(this, "Missing Bluetooth permission", Toast.LENGTH_LONG).show()
@@ -357,6 +359,14 @@ class ServerActivity : AppCompatActivity(), ApprovalDialog.ApprovalListener, Rem
         }
     }
 
+    private fun applyKeepScreenOnPreference() {
+        if (AppPreferences.isKeepScreenOnEnabled(this)) {
+            window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        } else {
+            window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+    }
+
     override fun onApprove(deviceId: String, deviceName: String?, deviceAddress: String) {
         Toast.makeText(this, "Approved device: $deviceId", Toast.LENGTH_SHORT).show()
 
@@ -432,6 +442,7 @@ class ServerActivity : AppCompatActivity(), ApprovalDialog.ApprovalListener, Rem
 
     override fun onStart() {
         super.onStart()
+        applyKeepScreenOnPreference()
         probeServiceLiveness()
         if (!approvalReceiverRegistered) {
             ContextCompat.registerReceiver(
@@ -458,6 +469,7 @@ class ServerActivity : AppCompatActivity(), ApprovalDialog.ApprovalListener, Rem
 
     override fun onResume() {
         super.onResume()
+        applyKeepScreenOnPreference()
         probeServiceLiveness()
     }
 }

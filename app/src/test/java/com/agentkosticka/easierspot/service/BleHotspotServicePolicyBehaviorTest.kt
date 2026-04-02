@@ -1,6 +1,7 @@
 package com.agentkosticka.easierspot.service
 
 import com.agentkosticka.easierspot.data.model.RememberedServer
+import com.agentkosticka.easierspot.ui.settings.AppPreferences
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -78,6 +79,52 @@ class BleHotspotServicePolicyBehaviorTest {
         val decision = service.decideApprovalDecision(remembered)
 
         assertEquals(BleHotspotService.ApprovalDecision.REQUEST_APPROVAL, decision)
+    }
+
+    @Test
+    fun `new device follows default ask policy`() {
+        val decision = service.decideApprovalDecision(
+            rememberedClient = null,
+            defaultPolicy = AppPreferences.ApprovalPolicy.ASK
+        )
+
+        assertEquals(BleHotspotService.ApprovalDecision.REQUEST_APPROVAL, decision)
+    }
+
+    @Test
+    fun `new device follows default approve policy`() {
+        val decision = service.decideApprovalDecision(
+            rememberedClient = null,
+            defaultPolicy = AppPreferences.ApprovalPolicy.APPROVE
+        )
+
+        assertEquals(BleHotspotService.ApprovalDecision.AUTO_APPROVE, decision)
+    }
+
+    @Test
+    fun `new device follows default deny policy`() {
+        val decision = service.decideApprovalDecision(
+            rememberedClient = null,
+            defaultPolicy = AppPreferences.ApprovalPolicy.DENY
+        )
+
+        assertEquals(BleHotspotService.ApprovalDecision.AUTO_DENY, decision)
+    }
+
+    @Test
+    fun `default policy mapping matches remembered-server constants`() {
+        assertEquals(
+            RememberedServer.APPROVAL_POLICY_ASK,
+            service.mapDefaultPolicyToRememberedPolicy(AppPreferences.ApprovalPolicy.ASK)
+        )
+        assertEquals(
+            RememberedServer.APPROVAL_POLICY_APPROVED,
+            service.mapDefaultPolicyToRememberedPolicy(AppPreferences.ApprovalPolicy.APPROVE)
+        )
+        assertEquals(
+            RememberedServer.APPROVAL_POLICY_DENIED,
+            service.mapDefaultPolicyToRememberedPolicy(AppPreferences.ApprovalPolicy.DENY)
+        )
     }
 
     @Test

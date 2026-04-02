@@ -1,6 +1,8 @@
 package com.agentkosticka.easierspot.util
 
+import android.content.Context
 import android.util.Log
+import com.agentkosticka.easierspot.ui.settings.AppPreferences
 
 /**
  * Configurable logging utility to reduce log spam.
@@ -29,6 +31,12 @@ object LogUtils {
      */
     var DIAGNOSTIC_MODE: Boolean = false
 
+    /**
+     * Application context for accessing preferences.
+     * Should be set once at app startup.
+     */
+    var appContext: Context? = null
+
     @Suppress("unused")
     fun v(tag: String, message: String) {
         if (LOG_LEVEL <= Level.VERBOSE) {
@@ -38,7 +46,8 @@ object LogUtils {
 
     @Suppress("unused")
     fun d(tag: String, message: String) {
-        if (LOG_LEVEL <= Level.DEBUG) {
+        val debugEnabled = appContext?.let { AppPreferences.isDebugLoggingEnabled(it) } ?: true
+        if (debugEnabled && LOG_LEVEL <= Level.DEBUG) {
             Log.d(tag, message)
         }
     }

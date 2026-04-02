@@ -52,9 +52,14 @@ class GattServer(private val context: Context, private val deviceId: String) {
     private val hotspotNotificationEnabledClients = mutableSetOf<String>()
     private var hotspotCredentials: HotspotCredentials? = null
     private var newClientCallback: ((String, String?) -> Unit)? = null
+    private var clientConnectionStateCallback: ((String, Boolean, String?) -> Unit)? = null
 
     fun setNewClientCallback(callback: (clientAddress: String, clientStableId: String?) -> Unit) {
         newClientCallback = callback
+    }
+
+    fun setClientConnectionStateCallback(callback: (clientAddress: String, connected: Boolean, clientStableId: String?) -> Unit) {
+        clientConnectionStateCallback = callback
     }
 
     fun startServer() {
@@ -230,6 +235,7 @@ class GattServer(private val context: Context, private val deviceId: String) {
                     LogUtils.i(TAG, "Client connected: ${device.address}")
                     val client = ClientConnection(device.address)
                     _connectedClients.value += client
+                    clientConnectionStateCallback?.invoke(device.address, true, clientStableIds[device.address])
 
                     // Wait for client stable ID write before evaluating approval.
                     if (device.address !in approvedClients) {
@@ -238,6 +244,7 @@ class GattServer(private val context: Context, private val deviceId: String) {
                 }
                 BluetoothProfile.STATE_DISCONNECTED -> {
                     LogUtils.i(TAG, "Client disconnected: ${device.address}")
+                    clientConnectionStateCallback?.invoke(device.address, false, clientStableIds[device.address])
                     approvedClients.remove(device.address)
                     clientStableIds.remove(device.address)
                     approvalNotificationEnabledClients.remove(device.address)

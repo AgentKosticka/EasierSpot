@@ -36,6 +36,7 @@ class GattClient(private val context: Context) {
         private const val TARGET_MTU = 517
         private const val APPROVAL_POLL_INTERVAL_MS = 2000L
         private const val APPROVAL_POLL_MAX_ATTEMPTS = 30 // 60 seconds max wait
+        private const val CONNECTION_TIMEOUT_MS = 10000L
     }
     private var gatt: BluetoothGatt? = null
     private var pendingDeviceIdRead = false
@@ -45,6 +46,8 @@ class GattClient(private val context: Context) {
     private var pendingHotspotCccdWrite = false
     private var pendingHotspotRead = false
     private var approvalPollJob: Job? = null
+    private var connectionTimeoutJob: Job? = null
+    private var serviceDiscoveryTimeoutJob: Job? = null
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
     private val _connectionState = MutableStateFlow<ConnectionState>(ConnectionState.DISCONNECTED)
@@ -95,10 +98,12 @@ class GattClient(private val context: Context) {
         _serverDeviceId.value = null
 
         gatt = device.connectGatt(context, false, GattCallbackImpl())
+        startConnectionTimeout()
     }
 
     fun disconnect() {
         stopApprovalPolling()
+        stopConnectionTimeouts()
         gatt?.disconnect()
         gatt?.close()
         gatt = null
@@ -108,6 +113,45 @@ class GattClient(private val context: Context) {
         pendingClientIdWrite = false
         pendingHotspotCccdWrite = false
         pendingHotspotRead = false
+    }
+
+    private fun getConnectionTimeoutMs(): Long {
+        return CONNECTION_TIMEOUT_MS
+    }
+
+    private fun startConnectionTimeout() {
+        connectionTimeoutJob?.cancel()
+        val timeoutMs = getConnectionTimeoutMs()
+        connectionTimeoutJob = scope.launch {
+            delay(timeoutMs)
+            if (_connectionState.value == ConnectionState.CONNECTING) {
+                _gattError.value = "BLE connection timed out"
+                _connectionState.value = ConnectionState.ERROR
+                gatt?.close()
+                gatt = null
+            }
+        }
+    }
+
+    private fun startServiceDiscoveryTimeout() {
+        serviceDiscoveryTimeoutJob?.cancel()
+        val timeoutMs = getConnectionTimeoutMs()
+        serviceDiscoveryTimeoutJob = scope.launch {
+            delay(timeoutMs)
+            if (_connectionState.value == ConnectionState.CONNECTED) {
+                _gattError.value = "Service discovery timed out"
+                _connectionState.value = ConnectionState.ERROR
+                gatt?.close()
+                gatt = null
+            }
+        }
+    }
+
+    private fun stopConnectionTimeouts() {
+        connectionTimeoutJob?.cancel()
+        connectionTimeoutJob = null
+        serviceDiscoveryTimeoutJob?.cancel()
+        serviceDiscoveryTimeoutJob = null
     }
 
     private fun getOrCreateStableClientId(): String {
@@ -305,7 +349,10 @@ class GattClient(private val context: Context) {
 
             when (newState) {
                 BluetoothProfile.STATE_CONNECTED -> {
+                    connectionTimeoutJob?.cancel()
+                    connectionTimeoutJob = null
                     _connectionState.value = ConnectionState.CONNECTED
+                    startServiceDiscoveryTimeout()
                     val mtuRequested = gatt.requestMtu(TARGET_MTU)
                     if (!mtuRequested) {
                         Log.w(TAG, "Failed to request MTU $TARGET_MTU, continuing with default MTU")
@@ -315,7 +362,10 @@ class GattClient(private val context: Context) {
                     }
                 }
                 BluetoothProfile.STATE_DISCONNECTED -> {
-                    _connectionState.value = ConnectionState.DISCONNECTED
+                    stopConnectionTimeouts()
+                    if (_connectionState.value != ConnectionState.ERROR) {
+                        _connectionState.value = ConnectionState.DISCONNECTED
+                    }
                 }
             }
         }
@@ -332,6 +382,8 @@ class GattClient(private val context: Context) {
 
         override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {
             super.onServicesDiscovered(gatt, status)
+            serviceDiscoveryTimeoutJob?.cancel()
+            serviceDiscoveryTimeoutJob = null
 
             if (status == BluetoothGatt.GATT_SUCCESS) {
                 enableServerNotifications()

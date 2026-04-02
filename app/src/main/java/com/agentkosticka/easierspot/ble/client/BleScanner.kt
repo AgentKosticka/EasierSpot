@@ -15,9 +15,12 @@ import android.os.ParcelUuid
 import android.util.Log
 import androidx.core.content.ContextCompat
 import com.agentkosticka.easierspot.ble.BleConstants
+import com.agentkosticka.easierspot.ui.settings.AppPreferences
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import android.os.Handler
+import android.os.Looper
 
 data class DiscoveredServer(
     val deviceId: String,
@@ -47,6 +50,8 @@ class BleScanner(private val context: Context) {
     val scanError: StateFlow<String?> = _scanError.asStateFlow()
 
     private val foundDevices = mutableMapOf<String, DiscoveredServer>()
+    private val scanTimeoutHandler = Handler(Looper.getMainLooper())
+    private var scanTimeoutRunnable: Runnable? = null
 
     fun isBluetoothEnabled(): Boolean = bluetoothAdapter?.isEnabled == true
     
@@ -153,6 +158,14 @@ class BleScanner(private val context: Context) {
             scanner?.startScan(listOf(scanFilter), scanSettings, scanCallback!!)
             _isScanning.value = true
             Log.d(TAG, "✓ Scan started successfully")
+            
+            // Schedule auto-stop based on scan timeout preference
+            val scanTimeoutMs = AppPreferences.getScanTimeoutMs(context)
+            scanTimeoutRunnable = Runnable {
+                Log.d(TAG, "Scan timeout reached (${scanTimeoutMs}ms), stopping scan")
+                stopScan()
+            }
+            scanTimeoutHandler.postDelayed(scanTimeoutRunnable!!, scanTimeoutMs)
         } catch (e: Exception) {
             Log.e(TAG, "Exception starting scan", e)
             _scanError.value = "Exception: ${e.message}"
@@ -164,6 +177,12 @@ class BleScanner(private val context: Context) {
         if (!isScanning.value && scanCallback == null) {
             Log.d(TAG, "Not scanning, nothing to stop")
             return
+        }
+
+        // Cancel any pending timeout
+        scanTimeoutRunnable?.let {
+            scanTimeoutHandler.removeCallbacks(it)
+            scanTimeoutRunnable = null
         }
 
         try {

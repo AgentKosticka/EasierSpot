@@ -35,4 +35,10 @@ interface RememberedServerDao {
 
     @Query("UPDATE remembered_servers SET lastApprovedAt = :lastApprovedAt WHERE deviceId = :deviceId")
     suspend fun updateLastApprovedAt(deviceId: String, lastApprovedAt: Long)
+
+    @Query("SELECT COUNT(*) FROM remembered_servers")
+    suspend fun getTotalCount(): Int
+
+    @Query("SELECT COUNT(*) FROM remembered_servers WHERE approvalPolicy = :policy")
+    suspend fun getCountByPolicy(policy: String): Int
 }

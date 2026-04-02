@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.preference.PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+
+    <!-- General Settings Category -->
+    <PreferenceCategory
+        app:title="@string/pref_category_general"
+        app:icon="@drawable/ic_general">
+
+        <ListPreference
+            app:key="theme_mode"
+            app:title="@string/pref_theme_mode_title"
+            app:summary="@string/pref_theme_mode_summary"
+            app:entries="@array/theme_mode_entries"
+            app:entryValues="@array/theme_mode_values"
+            app:defaultValue="system"
+            app:icon="@drawable/ic_theme" />
+
+        <SwitchPreferenceCompat
+            app:key="update_check_enabled"
+            app:title="@string/pref_update_check_title"
+            app:summary="@string/pref_update_check_summary"
+            app:defaultValue="true" />
+
+        <ListPreference
+            app:key="app_language"
+            app:title="@string/pref_app_language_title"
+            app:summary="@string/pref_app_language_summary"
+            app:entries="@array/app_language_entries"
+            app:entryValues="@array/app_language_values"
+            app:defaultValue="system" />
+
+        <Preference
+            app:key="diagnostics"
+            app:title="@string/title_diagnostics"
+            app:summary="@string/pref_diagnostics_summary" />
+
+        <Preference
+            app:key="view_permissions"
+            app:title="@string/view_permissions"
+            app:summary="@string/pref_view_permissions_summary" />
+
+    </PreferenceCategory>
+
+    <!-- BLE/Network Category -->
+    <PreferenceCategory
+        app:title="@string/pref_category_ble_network"
+        app:icon="@drawable/ic_bluetooth">
+
+        <ListPreference
+            app:key="ble_advertising_interval"
+            app:title="@string/pref_ble_advertising_interval_title"
+            app:summary="@string/pref_ble_advertising_interval_summary"
+            app:entries="@array/ble_advertising_interval_entries"
+            app:entryValues="@array/ble_advertising_interval_values"
+            app:defaultValue="balanced" />
+
+        <ListPreference
+            app:key="broadcast_strength"
+            app:title="@string/pref_broadcast_strength_title"
+            app:summary="@string/pref_broadcast_strength_summary"
+            app:entries="@array/broadcast_strength_entries"
+            app:entryValues="@array/broadcast_strength_values"
+            app:defaultValue="medium" />
+
+        <EditTextPreference
+            app:key="scan_timeout_ms"
+            app:title="@string/pref_scan_timeout_title"
+            app:defaultValue="30000"
+            app:useSimpleSummaryProvider="false" />
+
+        <SwitchPreferenceCompat
+            app:key="auto_retry_enabled"
+            app:title="@string/pref_auto_retry_title"
+            app:summary="@string/pref_auto_retry_summary"
+            app:defaultValue="true" />
+
+    </PreferenceCategory>
+
+    <!-- Server Mode Category -->
+    <PreferenceCategory
+        app:title="@string/pref_category_server_mode"
+        app:icon="@drawable/ic_server">
+
+        <ListPreference
+            app:key="default_approval_policy"
+            app:title="@string/pref_default_approval_policy_title"
+            app:summary="@string/pref_default_approval_policy_summary"
+            app:entries="@array/approval_policy_entries"
+            app:entryValues="@array/approval_policy_values"
+            app:defaultValue="ask" />
+
+    </PreferenceCategory>
+
+    <!-- Advanced Category -->
+    <PreferenceCategory
+        app:title="@string/pref_category_advanced"
+        app:icon="@drawable/ic_advanced">
+
+        <SwitchPreferenceCompat
+            app:key="debug_logging_enabled"
+            app:title="@string/pref_debug_logging_title"
+            app:summary="@string/pref_debug_logging_summary"
+            app:defaultValue="false" />
+
+        <Preference
+            app:key="battery_optimization"
+            app:title="@string/pref_battery_optimization_title"
+            app:summary="@string/pref_battery_optimization_summary">
+            <intent
+                android:action="android.settings.IGNORE_BATTERY_OPTIMIZATION_SETTINGS" />
+        </Preference>
+
+        <Preference
+            app:key="help_about"
+            app:title="@string/pref_help_about_title"
+            app:summary="@string/pref_help_about_summary"
+            app:icon="@drawable/ic_help" />
+
+    </PreferenceCategory>
+
+</androidx.preference.PreferenceScreen>

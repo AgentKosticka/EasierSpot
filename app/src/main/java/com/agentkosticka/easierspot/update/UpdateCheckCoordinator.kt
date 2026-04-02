@@ -30,6 +30,13 @@ object UpdateCheckCoordinator {
 
     fun triggerIfStale(context: Context) {
         val appContext = context.applicationContext
+        
+        // Check if update checking is enabled in preferences
+        if (!com.agentkosticka.easierspot.ui.settings.AppPreferences.isUpdateCheckEnabled(appContext)) {
+            LogUtils.d(TAG, "Update checking disabled in preferences, skipping check")
+            return
+        }
+        
         scope.launch {
             val state = UpdateChecker.refreshIfStale(appContext)
             notifyListeners(state)

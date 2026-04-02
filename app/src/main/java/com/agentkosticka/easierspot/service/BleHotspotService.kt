@@ -23,6 +23,7 @@ import com.agentkosticka.easierspot.data.db.AppDatabase
 import com.agentkosticka.easierspot.data.model.RememberedServer
 import com.agentkosticka.easierspot.hotspot.HotspotManager
 import com.agentkosticka.easierspot.ui.server.ServerActivity
+import com.agentkosticka.easierspot.ui.settings.AppPreferences
 import com.agentkosticka.easierspot.util.LogUtils
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
@@ -43,7 +44,6 @@ class BleHotspotService : Service() {
     companion object {
         private const val TAG = "BleHotspotService"
         private const val NOTIFICATION_ID = 1
-        private const val ENABLE_HOTSPOT_NOTIFICATION_ID = 2
         private const val APPROVAL_NOTIFICATION_ID = 3
         private const val SERVICE_CHANNEL_ID = "ble_hotspot_service"
         private const val ALERTS_CHANNEL_ID = "ble_hotspot_alerts"
@@ -234,6 +234,9 @@ class BleHotspotService : Service() {
             } else {
                 dao.getServerByAddress(clientAddress)
             }
+            val defaultPolicy = AppPreferences.getDefaultApprovalPolicy(this@BleHotspotService)
+            val resolvedClientId = resolveClientId(clientStableId, clientAddress)
+            val resolvedClientName = resolveClientName(clientStableId, resolvedClientId)
 
             if (rememberedClient != null) {
                 dao.insertServer(
@@ -244,15 +247,14 @@ class BleHotspotService : Service() {
                 )
             }
 
-            when (decideApprovalDecision(rememberedClient)) {
+            when (decideApprovalDecision(rememberedClient, defaultPolicy)) {
                 ApprovalDecision.REQUEST_APPROVAL -> {
                     if (rememberedClient == null) {
                         LogUtils.i(TAG, "New client $clientAddress requires approval")
-                        val stableId = clientStableId ?: "Unknown"
                         dispatchApprovalRequest(
                             clientAddress = clientAddress,
-                            deviceId = stableId,
-                            deviceName = stableId,
+                            deviceId = resolvedClientId,
+                            deviceName = resolvedClientName,
                             isRememberedClient = false,
                             nickname = null
                         )
@@ -268,20 +270,49 @@ class BleHotspotService : Service() {
                     }
                 }
                 ApprovalDecision.AUTO_DENY -> {
+                    if (rememberedClient == null) {
+                        rememberAutoDecisionForNewClient(
+                            dao = dao,
+                            clientAddress = clientAddress,
+                            clientDeviceId = resolvedClientId,
+                            clientName = resolvedClientName,
+                            policy = AppPreferences.ApprovalPolicy.DENY
+                        )
+                    }
                     LogUtils.i(TAG, "Client $clientAddress denied by saved policy")
                     denyClient(clientAddress)
                 }
                 ApprovalDecision.AUTO_APPROVE -> {
-                    val remembered = rememberedClient ?: return@launch
-                    LogUtils.i(TAG, "Client $clientAddress auto-approved by saved policy")
-                    activateHotspotAndSendCredentials(clientAddress, remembered.deviceId)
+                    val approvedDeviceId = if (rememberedClient == null) {
+                        rememberAutoDecisionForNewClient(
+                            dao = dao,
+                            clientAddress = clientAddress,
+                            clientDeviceId = resolvedClientId,
+                            clientName = resolvedClientName,
+                            policy = AppPreferences.ApprovalPolicy.APPROVE
+                        )
+                        resolvedClientId
+                    } else {
+                        rememberedClient.deviceId
+                    }
+                    LogUtils.i(TAG, "Client $clientAddress auto-approved by policy")
+                    activateHotspotAndSendCredentials(clientAddress, approvedDeviceId)
                 }
             }
         }
     }
 
-    internal fun decideApprovalDecision(rememberedClient: RememberedServer?): ApprovalDecision {
-        if (rememberedClient == null) return ApprovalDecision.REQUEST_APPROVAL
+    internal fun decideApprovalDecision(
+        rememberedClient: RememberedServer?,
+        defaultPolicy: AppPreferences.ApprovalPolicy = AppPreferences.ApprovalPolicy.ASK
+    ): ApprovalDecision {
+        if (rememberedClient == null) {
+            return when (defaultPolicy) {
+                AppPreferences.ApprovalPolicy.ASK -> ApprovalDecision.REQUEST_APPROVAL
+                AppPreferences.ApprovalPolicy.APPROVE -> ApprovalDecision.AUTO_APPROVE
+                AppPreferences.ApprovalPolicy.DENY -> ApprovalDecision.AUTO_DENY
+            }
+        }
         return when (rememberedClient.approvalPolicy) {
             RememberedServer.APPROVAL_POLICY_DENIED -> ApprovalDecision.AUTO_DENY
             RememberedServer.APPROVAL_POLICY_ASK -> ApprovalDecision.REQUEST_APPROVAL
@@ -293,6 +324,14 @@ class BleHotspotService : Service() {
                 }
             }
             else -> ApprovalDecision.REQUEST_APPROVAL
+        }
+    }
+
+    internal fun mapDefaultPolicyToRememberedPolicy(policy: AppPreferences.ApprovalPolicy): String {
+        return when (policy) {
+            AppPreferences.ApprovalPolicy.ASK -> RememberedServer.APPROVAL_POLICY_ASK
+            AppPreferences.ApprovalPolicy.APPROVE -> RememberedServer.APPROVAL_POLICY_APPROVED
+            AppPreferences.ApprovalPolicy.DENY -> RememberedServer.APPROVAL_POLICY_DENIED
         }
     }
 
@@ -312,6 +351,43 @@ class BleHotspotService : Service() {
             lastSeen = approvedAt,
             lastApprovedAt = approvedAt,
             isApproved = true
+        )
+    }
+
+    private fun resolveClientId(clientStableId: String?, clientAddress: String): String {
+        if (!clientStableId.isNullOrBlank()) {
+            return clientStableId
+        }
+        return "addr-${clientAddress.filter { it.isLetterOrDigit() }.lowercase()}"
+    }
+
+    private fun resolveClientName(clientStableId: String?, resolvedClientId: String): String {
+        if (!clientStableId.isNullOrBlank()) {
+            return clientStableId
+        }
+        return "Client-$resolvedClientId"
+    }
+
+    private suspend fun rememberAutoDecisionForNewClient(
+        dao: com.agentkosticka.easierspot.data.db.RememberedServerDao,
+        clientAddress: String,
+        clientDeviceId: String,
+        clientName: String,
+        policy: AppPreferences.ApprovalPolicy
+    ) {
+        val now = System.currentTimeMillis()
+        val isApproved = policy == AppPreferences.ApprovalPolicy.APPROVE
+        dao.insertServer(
+            RememberedServer(
+                deviceId = clientDeviceId,
+                deviceName = clientName,
+                deviceAddress = clientAddress,
+                lastSeen = now,
+                isApproved = isApproved,
+                nickname = null,
+                approvalPolicy = mapDefaultPolicyToRememberedPolicy(policy),
+                lastApprovedAt = if (isApproved) now else 0L
+            )
         )
     }
 
@@ -357,9 +433,7 @@ class BleHotspotService : Service() {
             // Check if user has it enabled already
             val isEnabled = hotspotManager?.isHotspotEnabled() ?: false
             if (!isEnabled) {
-                LogUtils.w(TAG, "Hotspot not enabled - prompting user")
-                // Send notification to user to enable hotspot
-                showEnableHotspotNotification()
+                LogUtils.w(TAG, "Hotspot not enabled - waiting for manual enable")
                 // Wait and check periodically
                 var attempts = 0
                 while (attempts < 30) { // Wait up to 30 seconds
@@ -403,33 +477,6 @@ class BleHotspotService : Service() {
         }
     }
     
-    private fun showEnableHotspotNotification() {
-        if (!canPostNotifications()) {
-            openTetheringSettingsDirectly()
-            return
-        }
-
-        val intent = hotspotManager?.getTetheringSettingsIntent()
-        val pendingIntent = PendingIntent.getActivity(
-            this,
-            0,
-            intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-        
-        val notification = NotificationCompat.Builder(this, ALERTS_CHANNEL_ID)
-            .setContentTitle("Enable Hotspot")
-            .setContentText("Tap to enable your existing hotspot configuration for sharing")
-            .setSmallIcon(android.R.drawable.ic_dialog_alert)
-            .setContentIntent(pendingIntent)
-            .setAutoCancel(true)
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .build()
-        
-        val notificationManager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
-        notificationManager.notify(ENABLE_HOTSPOT_NOTIFICATION_ID, notification)
-    }
-
     private fun approveClient(clientAddress: String, clientDeviceId: String, clientName: String) {
         serviceScope.launch {
             val dao = database.rememberedServerDao()
@@ -513,14 +560,27 @@ class BleHotspotService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val notification = NotificationCompat.Builder(this, ALERTS_CHANNEL_ID)
+        val notificationBuilder = NotificationCompat.Builder(this, ALERTS_CHANNEL_ID)
             .setContentTitle("New client approval required")
             .setContentText("Tap to approve hotspot sharing for $normalizedDisplayId")
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setContentIntent(pendingIntent)
             .setAutoCancel(true)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .build()
+
+        // Apply sound and vibration preferences
+        var defaults = 0
+        if (AppPreferences.isNotificationSoundEnabled(this)) {
+            defaults = defaults or NotificationCompat.DEFAULT_SOUND
+        }
+        if (AppPreferences.isNotificationVibrationEnabled(this)) {
+            defaults = defaults or NotificationCompat.DEFAULT_VIBRATE
+        }
+        if (defaults != 0) {
+            notificationBuilder.setDefaults(defaults)
+        }
+
+        val notification = notificationBuilder.build()
 
         val notificationManager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
         notificationManager.notify(APPROVAL_NOTIFICATION_ID, notification)
@@ -604,12 +664,4 @@ class BleHotspotService : Service() {
         return hasRuntimePermission && NotificationManagerCompat.from(this).areNotificationsEnabled()
     }
 
-    private fun openTetheringSettingsDirectly() {
-        val intent = hotspotManager?.getTetheringSettingsIntent() ?: return
-        try {
-            startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-        } catch (e: Exception) {
-            LogUtils.w(TAG, "Unable to open tethering settings: ${e.message}")
-        }
-    }
 }

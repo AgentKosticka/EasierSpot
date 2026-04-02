@@ -14,6 +14,7 @@ import android.os.ParcelUuid
 import android.util.Log
 import androidx.core.content.ContextCompat
 import com.agentkosticka.easierspot.ble.BleConstants
+import com.agentkosticka.easierspot.ui.settings.AppPreferences
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -69,9 +70,33 @@ class BleAdvertiser(private val context: Context, private val deviceId: String) 
         }
 
         Log.d(TAG, "Building advertise settings...")
+        
+        // Get advertising interval preference
+        val advertisingInterval = AppPreferences.getBleAdvertisingInterval(context)
+        val advertiseMode = when (advertisingInterval) {
+            AppPreferences.AdvertisingInterval.SLOW ->
+                AdvertiseSettings.ADVERTISE_MODE_LOW_POWER
+            AppPreferences.AdvertisingInterval.BALANCED ->
+                AdvertiseSettings.ADVERTISE_MODE_BALANCED
+            AppPreferences.AdvertisingInterval.FREQUENT ->
+                AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY
+        }
+
+        val broadcastStrength = AppPreferences.getBroadcastStrength(context)
+        val txPowerLevel = when (broadcastStrength) {
+            AppPreferences.BroadcastStrength.LOW -> AdvertiseSettings.ADVERTISE_TX_POWER_LOW
+            AppPreferences.BroadcastStrength.MEDIUM -> AdvertiseSettings.ADVERTISE_TX_POWER_MEDIUM
+            AppPreferences.BroadcastStrength.HIGH -> AdvertiseSettings.ADVERTISE_TX_POWER_HIGH
+        }
+        
+        Log.d(
+            TAG,
+            "Using advertise mode: $advertiseMode (interval: ${advertisingInterval.value}, txPower: ${broadcastStrength.value})"
+        )
+        
         val advertiseSettings = AdvertiseSettings.Builder()
-            .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY)
-            .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_HIGH)
+            .setAdvertiseMode(advertiseMode)
+            .setTxPowerLevel(txPowerLevel)
             .setConnectable(true)
             .setTimeout(0)  // Advertise indefinitely
             .build()
