@@ -36,7 +36,7 @@ Easier Spot operates in two modes:
 - Scans for nearby Easier Spot servers via BLE
 - Connects to discovered servers and requests hotspot credentials
 - Receives and displays the hotspot SSID and password and saves them with your system
-- Automatically attempts to connect to said Wi-Fi. Sometimes fails and needs to be connected manually clicked in your network settings
+- Automatically attempts to connect to said Wi-Fi. Sometimes fails and needs to be connected manually in your network settings
 
 ### Key Features
 
