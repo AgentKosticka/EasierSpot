@@ -1,10 +1,11 @@
+[!["Buy Me A Coffee"](https://www.buymeacoffee.com/assets/img/custom_images/orange_img.png)](https://www.buymeacoffee.com/agentkosticka)
 # Easier Spot
 
 Easier Spot is an Android application that simplifies Wi-Fi hotspot sharing between devices using Bluetooth Low Energy (BLE). Instead of manually sharing hotspot credentials, Easier Spot allows devices to automatically discover and connect to nearby hotspots.
 
 ## Overview
 
-Allows you to share your hotspot with your other devices and/or other people. Think apple continuity or Samsungs "Connect to device" but for anyone using two android devices.
+Allows you to share your hotspot with your other devices and/or other people. Think apple continuity or Samsung's "Connect to device" but for anyone using two android devices.
 
 ## Getting the app
 - You can download prebuilt `.apk` files in the [releases section](https://github.com/AgentKosticka/EasierSpot/releases)
