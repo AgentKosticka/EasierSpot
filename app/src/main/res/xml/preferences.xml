@@ -53,7 +53,7 @@
             app:summary="@string/pref_ble_advertising_interval_summary"
             app:entries="@array/ble_advertising_interval_entries"
             app:entryValues="@array/ble_advertising_interval_values"
-            app:defaultValue="balanced" />
+            app:defaultValue="slow" />
 
         <ListPreference
             app:key="broadcast_strength"
@@ -61,7 +61,7 @@
             app:summary="@string/pref_broadcast_strength_summary"
             app:entries="@array/broadcast_strength_entries"
             app:entryValues="@array/broadcast_strength_values"
-            app:defaultValue="medium" />
+            app:defaultValue="low" />
 
         <EditTextPreference
             app:key="scan_timeout_ms"

@@ -10,25 +10,31 @@ import android.bluetooth.le.AdvertiseSettings
 import android.bluetooth.le.BluetoothLeAdvertiser
 import android.content.Context
 import android.content.pm.PackageManager
+import android.os.Handler
+import android.os.Looper
 import android.os.ParcelUuid
-import android.util.Log
 import androidx.core.content.ContextCompat
 import com.agentkosticka.easierspot.ble.BleConstants
 import com.agentkosticka.easierspot.ui.settings.AppPreferences
+import com.agentkosticka.easierspot.util.LogUtils
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import java.security.MessageDigest
 
+/** Owns one advertiser and automatically drops from a short discovery burst to low power. */
 @SuppressLint("MissingPermission")
 class BleAdvertiser(private val context: Context, private val deviceId: String) {
     companion object {
         private const val TAG = "BleAdvertiser"
     }
-    
+
     private val bluetoothManager = context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
     private val bluetoothAdapter: BluetoothAdapter? = bluetoothManager.adapter
+    private val mainHandler = Handler(Looper.getMainLooper())
     private var advertiser: BluetoothLeAdvertiser? = null
     private var advertiseCallback: AdvertiseCallback? = null
+    private var startResult: ((Result<Unit>) -> Unit)? = null
 
     private val _isAdvertising = MutableStateFlow(false)
     val isAdvertising: StateFlow<Boolean> = _isAdvertising.asStateFlow()
@@ -36,146 +42,175 @@ class BleAdvertiser(private val context: Context, private val deviceId: String) 
     private val _advertisingError = MutableStateFlow<String?>(null)
     val advertisingError: StateFlow<String?> = _advertisingError.asStateFlow()
 
-    fun startAdvertising() {
-        Log.d(TAG, "startAdvertising() called, deviceId=$deviceId")
-        
+    private val downgradeRunnable = Runnable {
+        if (_isAdvertising.value) {
+            LogUtils.i(TAG, "Startup burst complete; switching to configured steady advertising")
+            stopCurrentAdvertisement()
+            startWithMode(
+                mode = sustainedMode(),
+                txPower = sustainedTxPower(),
+                reportResult = false
+            )
+        }
+    }
+
+    fun startAdvertising(onResult: (Result<Unit>) -> Unit = {}) {
         if (!hasBluetoothPermissions()) {
-            Log.e(TAG, "Missing Bluetooth permissions")
-            _advertisingError.value = "Missing Bluetooth permissions"
+            fail("Missing Bluetooth advertise permission", onResult)
+            return
+        }
+        val adapter = bluetoothAdapter
+        if (adapter == null) {
+            fail("Bluetooth adapter not available", onResult)
+            return
+        }
+        if (!adapter.isEnabled) {
+            fail("Bluetooth is disabled", onResult)
+            return
+        }
+        if (!adapter.isMultipleAdvertisementSupported) {
+            fail("BLE peripheral advertising is not supported", onResult)
+            return
+        }
+        if (_isAdvertising.value || advertiseCallback != null) {
+            onResult(Result.success(Unit))
             return
         }
 
-        if (bluetoothAdapter == null) {
-            Log.e(TAG, "Bluetooth adapter not available")
-            _advertisingError.value = "Bluetooth adapter not available"
-            return
-        }
-
-        if (!bluetoothAdapter.isEnabled) {
-            Log.e(TAG, "Bluetooth is disabled")
-            _advertisingError.value = "Bluetooth is disabled"
-            return
-        }
-
-        if (isAdvertising.value) {
-            Log.d(TAG, "Already advertising")
-            return
-        }
-
-        advertiser = bluetoothAdapter.bluetoothLeAdvertiser
+        advertiser = adapter.bluetoothLeAdvertiser
         if (advertiser == null) {
-            Log.e(TAG, "BLE advertising not supported on this device")
-            _advertisingError.value = "BLE advertising not supported on this device"
+            fail("BLE advertiser is unavailable", onResult)
             return
         }
 
-        Log.d(TAG, "Building advertise settings...")
-        
-        // Get advertising interval preference
-        val advertisingInterval = AppPreferences.getBleAdvertisingInterval(context)
-        val advertiseMode = when (advertisingInterval) {
-            AppPreferences.AdvertisingInterval.SLOW ->
-                AdvertiseSettings.ADVERTISE_MODE_LOW_POWER
-            AppPreferences.AdvertisingInterval.BALANCED ->
-                AdvertiseSettings.ADVERTISE_MODE_BALANCED
-            AppPreferences.AdvertisingInterval.FREQUENT ->
-                AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY
-        }
-
-        val broadcastStrength = AppPreferences.getBroadcastStrength(context)
-        val txPowerLevel = when (broadcastStrength) {
-            AppPreferences.BroadcastStrength.LOW -> AdvertiseSettings.ADVERTISE_TX_POWER_LOW
-            AppPreferences.BroadcastStrength.MEDIUM -> AdvertiseSettings.ADVERTISE_TX_POWER_MEDIUM
-            AppPreferences.BroadcastStrength.HIGH -> AdvertiseSettings.ADVERTISE_TX_POWER_HIGH
-        }
-        
-        Log.d(
-            TAG,
-            "Using advertise mode: $advertiseMode (interval: ${advertisingInterval.value}, txPower: ${broadcastStrength.value})"
+        startResult = onResult
+        startWithMode(
+            mode = AdvertiseSettings.ADVERTISE_MODE_BALANCED,
+            txPower = AdvertiseSettings.ADVERTISE_TX_POWER_MEDIUM,
+            reportResult = true
         )
-        
-        val advertiseSettings = AdvertiseSettings.Builder()
-            .setAdvertiseMode(advertiseMode)
-            .setTxPowerLevel(txPowerLevel)
+    }
+
+    private fun startWithMode(
+        mode: Int,
+        txPower: Int,
+        reportResult: Boolean,
+        includeDeviceName: Boolean = true
+    ) {
+        val settings = AdvertiseSettings.Builder()
+            .setAdvertiseMode(mode)
+            .setTxPowerLevel(txPower)
             .setConnectable(true)
-            .setTimeout(0)  // Advertise indefinitely
+            .setTimeout(0)
+            .build()
+        val data = AdvertiseData.Builder()
+            .addServiceData(ParcelUuid(BleConstants.SERVICE_UUID), discoveryPayload())
+            .setIncludeDeviceName(false)
+            .setIncludeTxPowerLevel(false)
+            .build()
+        val scanResponse = AdvertiseData.Builder()
+            .setIncludeDeviceName(includeDeviceName)
             .build()
 
-        Log.d(TAG, "Building advertise data with Service UUID: ${BleConstants.SERVICE_UUID}")
-        val advertiseData = AdvertiseData.Builder()
-            .addServiceUuid(ParcelUuid(BleConstants.SERVICE_UUID))
-            .setIncludeTxPowerLevel(false)  // Save space
-            .setIncludeDeviceName(false)    // Save space, put in scan response
-            .build()
-
-        val scanResponseData = AdvertiseData.Builder()
-            .setIncludeDeviceName(true)
-            .addManufacturerData(0x00FF, encodeDeviceId(deviceId))  // Use generic manufacturer ID
-            .build()
-
-        advertiseCallback = object : AdvertiseCallback() {
+        val callback = object : AdvertiseCallback() {
             override fun onStartSuccess(settingsInEffect: AdvertiseSettings) {
-                super.onStartSuccess(settingsInEffect)
-                Log.d(TAG, "✓ Advertising started successfully!")
-                Log.d(TAG, "  Mode: ${settingsInEffect.mode}, TxPower: ${settingsInEffect.txPowerLevel}")
+                if (advertiseCallback !== this) return
                 _isAdvertising.value = true
                 _advertisingError.value = null
+                LogUtils.i(TAG, "Advertising active (mode=${settingsInEffect.mode})")
+                if (reportResult) {
+                    startResult?.invoke(Result.success(Unit))
+                    startResult = null
+                    mainHandler.removeCallbacks(downgradeRunnable)
+                    mainHandler.postDelayed(downgradeRunnable, BleConstants.STARTUP_BURST_MS)
+                }
             }
 
             override fun onStartFailure(errorCode: Int) {
-                super.onStartFailure(errorCode)
-                val errorMsg = when (errorCode) {
-                    ADVERTISE_FAILED_ALREADY_STARTED -> "Already advertising"
-                    ADVERTISE_FAILED_DATA_TOO_LARGE -> "Data too large for advertisement"
-                    ADVERTISE_FAILED_FEATURE_UNSUPPORTED -> "Feature not supported"
-                    ADVERTISE_FAILED_INTERNAL_ERROR -> "Internal error"
-                    ADVERTISE_FAILED_TOO_MANY_ADVERTISERS -> "Too many advertisers"
-                    else -> "Unknown error"
-                }
-                Log.e(TAG, "✗ Advertising failed: $errorMsg (code: $errorCode)")
+                if (advertiseCallback !== this) return
+                advertiseCallback = null
                 _isAdvertising.value = false
-                _advertisingError.value = "Advertising failed: $errorMsg"
+                if (errorCode == ADVERTISE_FAILED_DATA_TOO_LARGE && includeDeviceName) {
+                    LogUtils.w(TAG, "Bluetooth name is too long for scan response; retrying without it")
+                    startWithMode(mode, txPower, reportResult, includeDeviceName = false)
+                    return
+                }
+                val message = "Advertising failed: ${errorName(errorCode)} ($errorCode)"
+                _advertisingError.value = message
+                LogUtils.e(TAG, message)
+                if (reportResult) {
+                    startResult?.invoke(Result.failure(IllegalStateException(message)))
+                    startResult = null
+                }
             }
         }
-
-        Log.d(TAG, "Starting advertisement...")
+        advertiseCallback = callback
         try {
-            advertiser?.startAdvertising(advertiseSettings, advertiseData, scanResponseData, advertiseCallback!!)
-            Log.d(TAG, "startAdvertising() call completed, waiting for callback...")
-        } catch (e: Exception) {
-            Log.e(TAG, "Exception starting advertising", e)
-            _advertisingError.value = "Exception: ${e.message}"
+            advertiser?.startAdvertising(settings, data, scanResponse, callback)
+        } catch (error: Exception) {
+            advertiseCallback = null
+            _isAdvertising.value = false
+            _advertisingError.value = error.message ?: "Unable to start advertising"
+            if (reportResult) {
+                startResult?.invoke(Result.failure(error))
+                startResult = null
+            }
         }
     }
 
     fun stopAdvertising() {
-        Log.d(TAG, "stopAdvertising() called")
-        if (!isAdvertising.value && advertiseCallback == null) {
-            Log.d(TAG, "Not advertising, nothing to stop")
-            return
-        }
+        mainHandler.removeCallbacks(downgradeRunnable)
+        startResult = null
+        stopCurrentAdvertisement()
+        advertiser = null
+    }
 
-        try {
-            advertiseCallback?.let {
-                advertiser?.stopAdvertising(it)
-                Log.d(TAG, "Advertising stopped")
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error stopping advertising", e)
-        }
+    private fun stopCurrentAdvertisement() {
+        val callback = advertiseCallback
         advertiseCallback = null
+        if (callback != null) {
+            runCatching { advertiser?.stopAdvertising(callback) }
+                .onFailure { LogUtils.w(TAG, "Error stopping advertiser", it) }
+        }
         _isAdvertising.value = false
     }
 
-    private fun encodeDeviceId(deviceId: String): ByteArray {
-        val bytes = deviceId.toByteArray(Charsets.UTF_8)
-        return ByteArray(4) { bytes.getOrNull(it) ?: 0 }
+    private fun discoveryPayload(): ByteArray {
+        val digest = MessageDigest.getInstance("SHA-256")
+            .digest(deviceId.toByteArray(Charsets.UTF_8))
+        return byteArrayOf(BleConstants.PROTOCOL_VERSION) + digest.copyOf(4)
     }
 
-    private fun hasBluetoothPermissions(): Boolean {
-        return ContextCompat.checkSelfPermission(
-            context,
-            Manifest.permission.BLUETOOTH_ADVERTISE
-        ) == PackageManager.PERMISSION_GRANTED
+    private fun sustainedMode(): Int = when (AppPreferences.getBleAdvertisingInterval(context)) {
+        AppPreferences.AdvertisingInterval.SLOW -> AdvertiseSettings.ADVERTISE_MODE_LOW_POWER
+        AppPreferences.AdvertisingInterval.BALANCED -> AdvertiseSettings.ADVERTISE_MODE_BALANCED
+        AppPreferences.AdvertisingInterval.FREQUENT -> AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY
     }
+
+    private fun sustainedTxPower(): Int = when (AppPreferences.getBroadcastStrength(context)) {
+        AppPreferences.BroadcastStrength.LOW -> AdvertiseSettings.ADVERTISE_TX_POWER_ULTRA_LOW
+        AppPreferences.BroadcastStrength.MEDIUM -> AdvertiseSettings.ADVERTISE_TX_POWER_MEDIUM
+        AppPreferences.BroadcastStrength.HIGH -> AdvertiseSettings.ADVERTISE_TX_POWER_HIGH
+    }
+
+    private fun fail(message: String, callback: (Result<Unit>) -> Unit) {
+        _advertisingError.value = message
+        _isAdvertising.value = false
+        LogUtils.e(TAG, message)
+        callback(Result.failure(IllegalStateException(message)))
+    }
+
+    private fun errorName(errorCode: Int): String = when (errorCode) {
+        AdvertiseCallback.ADVERTISE_FAILED_ALREADY_STARTED -> "already started"
+        AdvertiseCallback.ADVERTISE_FAILED_DATA_TOO_LARGE -> "data too large"
+        AdvertiseCallback.ADVERTISE_FAILED_FEATURE_UNSUPPORTED -> "feature unsupported"
+        AdvertiseCallback.ADVERTISE_FAILED_INTERNAL_ERROR -> "controller error"
+        AdvertiseCallback.ADVERTISE_FAILED_TOO_MANY_ADVERTISERS -> "controller advertiser limit"
+        else -> "unknown error"
+    }
+
+    private fun hasBluetoothPermissions(): Boolean = ContextCompat.checkSelfPermission(
+        context,
+        Manifest.permission.BLUETOOTH_ADVERTISE
+    ) == PackageManager.PERMISSION_GRANTED
 }

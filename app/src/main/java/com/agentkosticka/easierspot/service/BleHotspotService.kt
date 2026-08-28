@@ -6,7 +6,13 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.bluetooth.BluetoothAdapter
+import android.bluetooth.BluetoothA2dp
+import android.bluetooth.BluetoothHeadset
 import android.content.Intent
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.IntentFilter
 import android.content.pm.ServiceInfo
 import android.os.Binder
 import android.os.Build
@@ -30,11 +36,26 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.UUID
 
 class BleHotspotService : Service() {
+    enum class ServerState {
+        STOPPED,
+        STARTING,
+        ADVERTISING,
+        CLIENT_PENDING,
+        HOTSPOT_STARTING,
+        SHARING,
+        PAUSED_FOR_AUDIO,
+        DEGRADED
+    }
+
     internal enum class ApprovalDecision {
         REQUEST_APPROVAL,
         AUTO_DENY,
@@ -61,12 +82,19 @@ class BleHotspotService : Service() {
         const val EXTRA_APPROVAL_DISPLAY_NAME = "approval_display_name"
         const val EXTRA_APPROVAL_NICKNAME = "approval_nickname"
         const val ACTION_RESHOW_NOTIFICATION = "com.agentkosticka.easierspot.RESHOW_NOTIFICATION"
+        const val ACTION_PAUSE_SERVER = "com.agentkosticka.easierspot.PAUSE_SERVER"
+        const val ACTION_RESUME_SERVER = "com.agentkosticka.easierspot.RESUME_SERVER"
 
-        @Volatile
-        var isServerRunning: Boolean = false
-            private set
+        private val _serverState = MutableStateFlow(ServerState.STOPPED)
+        val serverState: StateFlow<ServerState> = _serverState.asStateFlow()
+        val isServerRunning: Boolean
+            get() = _serverState.value != ServerState.STOPPED
         private const val STATE_PREFS = "server_service_state"
         private const val KEY_RUNNING = "running"
+        private const val KEY_DEVICE_ID = "device_id"
+        private const val KEY_HOTSPOT_OWNED = "hotspot_owned"
+        private const val HOTSPOT_SAFETY_TIMEOUT_MS = 30 * 60 * 1000L
+        private val BLE_RETRY_DELAYS_MS = longArrayOf(1_000L, 5_000L, 30_000L)
         private val CLIENT_PREFIX_REGEX = Regex("(?i)^client[-_\\s]*")
 
         internal fun normalizeIdentityForDisplay(rawIdentity: String?): String {
@@ -98,6 +126,44 @@ class BleHotspotService : Service() {
     )
     private val binder = LocalBinder()
     private val database by lazy { AppDatabase.getDatabase(this) }
+    private var hotspotStartedByApp = false
+    private var hotspotShutdownJob: Job? = null
+    private var bleRetryJob: Job? = null
+    private var bleRetryAttempt = 0
+    private var pausedForAudio = false
+    private val bluetoothStateReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            when (intent?.action) {
+                BluetoothAdapter.ACTION_STATE_CHANGED -> {
+                    when (intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, BluetoothAdapter.ERROR)) {
+                        BluetoothAdapter.STATE_OFF -> {
+                            cancelBleRetry()
+                            bleAdvertiser?.stopAdvertising()
+                            gattServer?.stopServer()
+                            _serverState.value = ServerState.DEGRADED
+                        }
+                        BluetoothAdapter.STATE_ON -> if (desiredRunning() && !pausedForAudio) {
+                            currentDeviceId?.let(::startBleServer)
+                        }
+                    }
+                }
+                BluetoothA2dp.ACTION_CONNECTION_STATE_CHANGED,
+                BluetoothHeadset.ACTION_CONNECTION_STATE_CHANGED -> {
+                    val state = intent.getIntExtra(
+                        android.bluetooth.BluetoothProfile.EXTRA_STATE,
+                        android.bluetooth.BluetoothProfile.STATE_DISCONNECTED
+                    )
+                    if (state == android.bluetooth.BluetoothProfile.STATE_CONNECTING) {
+                        pauseForAudioConnection()
+                    } else if (pausedForAudio && (state == android.bluetooth.BluetoothProfile.STATE_CONNECTED ||
+                            state == android.bluetooth.BluetoothProfile.STATE_DISCONNECTED)
+                    ) {
+                        resumeAfterAudioConnection()
+                    }
+                }
+            }
+        }
+    }
 
     inner class LocalBinder : Binder() {
         fun getService(): BleHotspotService = this@BleHotspotService
@@ -108,6 +174,16 @@ class BleHotspotService : Service() {
         try {
             createNotificationChannel()
             hotspotManager = HotspotManager(this)
+            hotspotStartedByApp = getSharedPreferences(STATE_PREFS, MODE_PRIVATE)
+                .getBoolean(KEY_HOTSPOT_OWNED, false)
+            registerReceiver(
+                bluetoothStateReceiver,
+                IntentFilter().apply {
+                    addAction(BluetoothAdapter.ACTION_STATE_CHANGED)
+                    addAction(BluetoothA2dp.ACTION_CONNECTION_STATE_CHANGED)
+                    addAction(BluetoothHeadset.ACTION_CONNECTION_STATE_CHANGED)
+                }
+            )
         } catch (e: Exception) {
             LogUtils.e(TAG, "Error in onCreate", e)
         }
@@ -115,49 +191,55 @@ class BleHotspotService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         try {
+            val restoredAction = intent?.action ?: if (desiredRunning()) ACTION_START_SERVER else null
+            if (restoredAction == null) {
+                stopSelf(startId)
+                return START_NOT_STICKY
+            }
             val notification = createNotification()
             val serviceType = ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
             ServiceCompat.startForeground(this, NOTIFICATION_ID, notification, serviceType)
 
-            when (intent?.action) {
+            when (restoredAction) {
                 ACTION_START_SERVER -> {
-                    val deviceId = intent.getStringExtra(EXTRA_DEVICE_ID) ?: UUID.randomUUID().toString().take(4)
+                    val prefs = getSharedPreferences(STATE_PREFS, MODE_PRIVATE)
+                    val deviceId = intent?.getStringExtra(EXTRA_DEVICE_ID)
+                        ?: prefs.getString(KEY_DEVICE_ID, null)
+                        ?: UUID.randomUUID().toString().take(8)
                     currentDeviceId = deviceId
                     LogUtils.i(TAG, "Starting BLE server with deviceId: $deviceId")
+                    _serverState.value = ServerState.STARTING
+                    persistServerState(true, deviceId)
                     startBleServer(deviceId)
-                    isServerRunning = true
-                    persistServerState(true)
                 }
                 ACTION_STOP_SERVER -> {
-                    stopBleServer()
-                    isServerRunning = false
                     persistServerState(false)
-                    stopSelf()
+                    stopServerAndSelf()
                 }
                 ACTION_APPROVE_CLIENT -> {
                     dismissApprovalNotification()
-                    val clientAddress = intent.getStringExtra(EXTRA_CLIENT_ADDRESS)
+                    val clientAddress = intent?.getStringExtra(EXTRA_CLIENT_ADDRESS)
                     if (clientAddress != null) {
-                        val clientDeviceId = intent.getStringExtra(EXTRA_CLIENT_DEVICE_ID) ?: "Unknown"
-                        val clientName = intent.getStringExtra(EXTRA_CLIENT_NAME) ?: "Unknown Device"
+                        val clientDeviceId = intent?.getStringExtra(EXTRA_CLIENT_DEVICE_ID) ?: "Unknown"
+                        val clientName = intent?.getStringExtra(EXTRA_CLIENT_NAME) ?: "Unknown Device"
                         approveClient(clientAddress, clientDeviceId, clientName)
                     }
                 }
                 ACTION_DENY_CLIENT -> {
                     dismissApprovalNotification()
-                    val clientAddress = intent.getStringExtra(EXTRA_CLIENT_ADDRESS)
+                    val clientAddress = intent?.getStringExtra(EXTRA_CLIENT_ADDRESS)
                     if (clientAddress != null) {
                         denyClient(clientAddress)
                     }
                 }
                 ACTION_SHOW_APPROVAL -> {
-                    val clientAddress = intent.getStringExtra(EXTRA_CLIENT_ADDRESS) ?: ""
-                    val deviceId = intent.getStringExtra(EXTRA_CLIENT_DEVICE_ID) ?: "Unknown"
-                    val deviceName = intent.getStringExtra(EXTRA_CLIENT_NAME)
-                    val isRememberedClient = intent.getBooleanExtra(EXTRA_APPROVAL_IS_REMEMBERED, false)
-                    val displayId = intent.getStringExtra(EXTRA_APPROVAL_DISPLAY_ID)
-                    val displayName = intent.getStringExtra(EXTRA_APPROVAL_DISPLAY_NAME)
-                    val nickname = intent.getStringExtra(EXTRA_APPROVAL_NICKNAME)
+                    val clientAddress = intent?.getStringExtra(EXTRA_CLIENT_ADDRESS) ?: ""
+                    val deviceId = intent?.getStringExtra(EXTRA_CLIENT_DEVICE_ID) ?: "Unknown"
+                    val deviceName = intent?.getStringExtra(EXTRA_CLIENT_NAME)
+                    val isRememberedClient = intent?.getBooleanExtra(EXTRA_APPROVAL_IS_REMEMBERED, false) == true
+                    val displayId = intent?.getStringExtra(EXTRA_APPROVAL_DISPLAY_ID)
+                    val displayName = intent?.getStringExtra(EXTRA_APPROVAL_DISPLAY_NAME)
+                    val nickname = intent?.getStringExtra(EXTRA_APPROVAL_NICKNAME)
                     showApprovalNotification(
                         clientAddress = clientAddress,
                         deviceId = deviceId,
@@ -173,12 +255,19 @@ class BleHotspotService : Service() {
                     val notificationManager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
                     notificationManager.notify(NOTIFICATION_ID, notification)
                 }
+                ACTION_PAUSE_SERVER -> {
+                    pauseForAudioConnection()
+                    android.os.Handler(mainLooper).postDelayed({
+                        if (pausedForAudio && desiredRunning()) resumeAfterAudioConnection()
+                    }, 30_000L)
+                }
+                ACTION_RESUME_SERVER -> resumeAfterAudioConnection()
             }
         } catch (e: Exception) {
             LogUtils.e(TAG, "Error in onStartCommand", e)
         }
 
-        return START_STICKY
+        return if (desiredRunning()) START_STICKY else START_NOT_STICKY
     }
 
     override fun onBind(intent: Intent?): IBinder {
@@ -186,57 +275,107 @@ class BleHotspotService : Service() {
     }
 
     private fun startBleServer(deviceId: String) {
+        bleRetryJob?.cancel()
+        bleRetryJob = null
+        bleRetryAttempt = 0
+        attemptStartBleServer(deviceId)
+    }
+
+    private fun attemptStartBleServer(deviceId: String) {
         try {
-            if (bleAdvertiser == null) {
-                bleAdvertiser = BleAdvertiser(this, deviceId)
-                gattServer = GattServer(this, deviceId)
-                
-                // Set callback for new client connections
-                gattServer?.setNewClientCallback { clientAddress, clientStableId ->
-                    checkAndRequestApproval(clientAddress, clientStableId)
+            if (pausedForAudio) return
+            if (bleAdvertiser != null || gattServer != null) {
+                stopBleTransport()
+            }
+
+            val server = GattServer(this, deviceId).also { gattServer = it }
+            server.setNewClientCallback { clientAddress, clientStableId ->
+                _serverState.value = ServerState.CLIENT_PENDING
+                checkAndRequestApproval(clientAddress, clientStableId)
+            }
+            server.startServer { result ->
+                android.os.Handler(mainLooper).post {
+                    result.onSuccess {
+                        val advertiser = BleAdvertiser(this, deviceId).also { bleAdvertiser = it }
+                        advertiser.startAdvertising { advertiseResult ->
+                            advertiseResult.onSuccess {
+                                bleRetryAttempt = 0
+                                _serverState.value = ServerState.ADVERTISING
+                                updateServiceNotification()
+                            }.onFailure { error ->
+                                LogUtils.e(TAG, "BLE advertising failed", error)
+                                _serverState.value = ServerState.DEGRADED
+                                stopBleTransport()
+                                updateServiceNotification()
+                                scheduleBleRetry(deviceId)
+                            }
+                        }
+                    }.onFailure { error ->
+                        LogUtils.e(TAG, "GATT server startup failed", error)
+                        _serverState.value = ServerState.DEGRADED
+                        stopBleTransport()
+                        updateServiceNotification()
+                        scheduleBleRetry(deviceId)
+                    }
                 }
             }
-            
-            bleAdvertiser?.startAdvertising()
-            
-            // Check for advertising errors after a short delay
-            android.os.Handler(mainLooper).postDelayed({
-                val error = bleAdvertiser?.advertisingError?.value
-                val isAdvertising = bleAdvertiser?.isAdvertising?.value ?: false
-                if (error != null) {
-                    LogUtils.e(TAG, "Advertising error: $error")
-                } else if (isAdvertising) {
-                    LogUtils.i(TAG, "BLE advertising active")
-                }
-            }, 1000)
-            
-            gattServer?.startServer()
         } catch (e: Exception) {
             LogUtils.e(TAG, "Error starting BLE server", e)
+            _serverState.value = ServerState.DEGRADED
+            stopBleTransport()
+            scheduleBleRetry(deviceId)
+        }
+    }
+
+    private fun scheduleBleRetry(deviceId: String) {
+        if (!desiredRunning() || pausedForAudio || bleRetryJob?.isActive == true) return
+        val delayMs = BLE_RETRY_DELAYS_MS[bleRetryAttempt.coerceAtMost(BLE_RETRY_DELAYS_MS.lastIndex)]
+        bleRetryAttempt++
+        bleRetryJob = serviceScope.launch {
+            delay(delayMs)
+            if (desiredRunning() && !pausedForAudio) {
+                withContext(Dispatchers.Main) { attemptStartBleServer(deviceId) }
+            }
         }
     }
 
     private fun stopBleServer() {
+        cancelBleRetry()
+        stopBleTransport()
+        hotspotShutdownJob?.cancel()
+        hotspotShutdownJob = null
+        _serverState.value = ServerState.STOPPED
+        dismissApprovalNotification()
+    }
+
+    private fun stopBleTransport() {
         bleAdvertiser?.stopAdvertising()
         gattServer?.stopServer()
         bleAdvertiser = null
         gattServer = null
-        isServerRunning = false
-        persistServerState(false)
-        dismissApprovalNotification()
+    }
+
+    private fun cancelBleRetry() {
+        bleRetryJob?.cancel()
+        bleRetryJob = null
+        bleRetryAttempt = 0
     }
 
     private fun checkAndRequestApproval(clientAddress: String, clientStableId: String?) {
         serviceScope.launch {
             val dao = database.rememberedServerDao()
             val rememberedClient = if (!clientStableId.isNullOrBlank()) {
-                dao.getServerById(clientStableId) ?: dao.getServerByAddress(clientAddress)
+                // Protocol-v2 trust is bound to the authenticated public-key fingerprint. Never
+                // inherit approval from a legacy/spoofable BLE address.
+                dao.getServerById(clientStableId)
             } else {
                 dao.getServerByAddress(clientAddress)
             }
             val defaultPolicy = AppPreferences.getDefaultApprovalPolicy(this@BleHotspotService)
             val resolvedClientId = resolveClientId(clientStableId, clientAddress)
-            val resolvedClientName = resolveClientName(clientStableId, resolvedClientId)
+            val pairingCode = gattServer?.getPairingCode(clientAddress)
+            val resolvedClientName = pairingCode?.let { "Pairing code $it" }
+                ?: resolveClientName(clientStableId, resolvedClientId)
 
             if (rememberedClient != null) {
                 dao.insertServer(
@@ -426,34 +565,33 @@ class BleHotspotService : Service() {
     }
     
     private suspend fun activateHotspotAndSendCredentials(clientAddress: String, clientDeviceId: String? = null) {
-        val hotspotStarted = hotspotManager?.startHotspot() ?: false
-        
-        if (!hotspotStarted) {
-            // Hotspot couldn't be started programmatically
-            // Check if user has it enabled already
-            val isEnabled = hotspotManager?.isHotspotEnabled() ?: false
-            if (!isEnabled) {
-                LogUtils.w(TAG, "Hotspot not enabled - waiting for manual enable")
-                // Wait and check periodically
-                var attempts = 0
-                while (attempts < 30) { // Wait up to 30 seconds
-                    delay(1000)
-                    if (hotspotManager?.isHotspotEnabled() == true) {
-                        sendCredentialsToClient(clientAddress, clientDeviceId)
-                        return
-                    }
-                    attempts++
-                }
-                LogUtils.w(TAG, "Timeout waiting for hotspot enable")
-                withContext(Dispatchers.Main) {
-                    gattServer?.denyClient(clientAddress)
-                }
-                return
-            }
+        _serverState.value = ServerState.HOTSPOT_STARTING
+        updateServiceNotification()
+        val wasEnabled = hotspotManager?.isHotspotEnabled() == true
+        val startAccepted = wasEnabled || hotspotManager?.startHotspot() == true
+        if (!startAccepted) {
+            LogUtils.w(TAG, "Hotspot start request was rejected")
+            withContext(Dispatchers.Main) { gattServer?.denyClient(clientAddress) }
+            _serverState.value = ServerState.ADVERTISING
+            updateServiceNotification()
+            return
         }
-        
-        delay(1000)
-        
+
+        if (!wasEnabled) setHotspotOwned(true)
+        var enabled = hotspotManager?.isHotspotEnabled() == true
+        var checksRemaining = 30
+        while (!enabled && checksRemaining-- > 0) {
+            delay(1_000)
+            enabled = hotspotManager?.isHotspotEnabled() == true
+        }
+        if (!enabled) {
+            LogUtils.w(TAG, "Timed out waiting for confirmed hotspot state")
+            withContext(Dispatchers.Main) { gattServer?.denyClient(clientAddress) }
+            stopOwnedHotspot()
+            _serverState.value = ServerState.ADVERTISING
+            updateServiceNotification()
+            return
+        }
         sendCredentialsToClient(clientAddress, clientDeviceId)
     }
     
@@ -469,6 +607,9 @@ class BleHotspotService : Service() {
                 delay(100)
                 gattServer?.sendHotspotCredentials(clientAddress, credentials)
             }
+            _serverState.value = ServerState.SHARING
+            updateServiceNotification()
+            scheduleHotspotSafetyStop()
         } else {
             withContext(Dispatchers.Main) {
                 LogUtils.w(TAG, "No hotspot credentials available; denying client")
@@ -480,7 +621,7 @@ class BleHotspotService : Service() {
     private fun approveClient(clientAddress: String, clientDeviceId: String, clientName: String) {
         serviceScope.launch {
             val dao = database.rememberedServerDao()
-            val existing = dao.getServerById(clientDeviceId) ?: dao.getServerByAddress(clientAddress)
+            val existing = dao.getServerById(clientDeviceId)
             val approvedAt = System.currentTimeMillis()
 
             if (existing != null) {
@@ -504,7 +645,7 @@ class BleHotspotService : Service() {
     private suspend fun updateLastApprovedAt(clientAddress: String, clientDeviceId: String?) {
         val dao = database.rememberedServerDao()
         val server = if (!clientDeviceId.isNullOrBlank()) {
-            dao.getServerById(clientDeviceId) ?: dao.getServerByAddress(clientAddress)
+            dao.getServerById(clientDeviceId)
         } else {
             dao.getServerByAddress(clientAddress)
         }
@@ -592,16 +733,87 @@ class BleHotspotService : Service() {
     }
 
     override fun onDestroy() {
+        runCatching { unregisterReceiver(bluetoothStateReceiver) }
+        stopBleServer()
+        if (hotspotStartedByApp) {
+            runCatching { hotspotManager?.stopHotspot() }
+            setHotspotOwned(false)
+        }
         serviceJob.cancel()
         super.onDestroy()
-        stopBleServer()
     }
 
-    private fun persistServerState(running: Boolean) {
+    private fun persistServerState(running: Boolean, deviceId: String? = currentDeviceId) {
         getSharedPreferences(STATE_PREFS, MODE_PRIVATE)
             .edit {
                 putBoolean(KEY_RUNNING, running)
+                if (deviceId != null) putString(KEY_DEVICE_ID, deviceId)
             }
+    }
+
+    private fun desiredRunning(): Boolean = getSharedPreferences(STATE_PREFS, MODE_PRIVATE)
+        .getBoolean(KEY_RUNNING, false)
+
+    private fun stopServerAndSelf() {
+        stopBleServer()
+        serviceScope.launch {
+            stopOwnedHotspot()
+            withContext(Dispatchers.Main) {
+                ServiceCompat.stopForeground(this@BleHotspotService, ServiceCompat.STOP_FOREGROUND_REMOVE)
+                stopSelf()
+            }
+        }
+    }
+
+    private suspend fun stopOwnedHotspot() {
+        if (!hotspotStartedByApp) return
+        val stopped = hotspotManager?.stopHotspot() == true
+        LogUtils.i(TAG, "Owned hotspot stop requested; accepted=$stopped")
+        setHotspotOwned(false)
+        hotspotShutdownJob?.cancel()
+        hotspotShutdownJob = null
+    }
+
+    private fun scheduleHotspotSafetyStop() {
+        if (!hotspotStartedByApp) return
+        hotspotShutdownJob?.cancel()
+        hotspotShutdownJob = serviceScope.launch {
+            delay(HOTSPOT_SAFETY_TIMEOUT_MS)
+            LogUtils.i(TAG, "Stopping app-owned hotspot at safety timeout")
+            stopOwnedHotspot()
+            if (desiredRunning()) {
+                _serverState.value = ServerState.ADVERTISING
+                updateServiceNotification()
+            }
+        }
+    }
+
+    private fun pauseForAudioConnection() {
+        if (!desiredRunning() || pausedForAudio) return
+        pausedForAudio = true
+        cancelBleRetry()
+        stopBleTransport()
+        _serverState.value = ServerState.PAUSED_FOR_AUDIO
+        updateServiceNotification()
+    }
+
+    private fun resumeAfterAudioConnection() {
+        if (!pausedForAudio) return
+        pausedForAudio = false
+        _serverState.value = ServerState.STARTING
+        currentDeviceId?.let(::startBleServer)
+    }
+
+    private fun setHotspotOwned(owned: Boolean) {
+        hotspotStartedByApp = owned
+        getSharedPreferences(STATE_PREFS, MODE_PRIVATE).edit {
+            putBoolean(KEY_HOTSPOT_OWNED, owned)
+        }
+    }
+
+    private fun updateServiceNotification() {
+        val manager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+        manager.notify(NOTIFICATION_ID, createNotification())
     }
 
     private fun createNotificationChannel() {
@@ -636,9 +848,38 @@ class BleHotspotService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
+        val stopIntent = Intent(this, BleHotspotService::class.java).apply {
+            action = ACTION_STOP_SERVER
+        }
+        val stopPendingIntent = PendingIntent.getService(
+            this,
+            3,
+            stopIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val pauseIntent = Intent(this, BleHotspotService::class.java).apply {
+            action = if (pausedForAudio) ACTION_RESUME_SERVER else ACTION_PAUSE_SERVER
+        }
+        val pausePendingIntent = PendingIntent.getService(
+            this,
+            4,
+            pauseIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val statusText = when (_serverState.value) {
+            ServerState.STARTING -> "Starting Bluetooth sharing…"
+            ServerState.ADVERTISING -> "Low-power discovery active"
+            ServerState.CLIENT_PENDING -> "Client approval pending"
+            ServerState.HOTSPOT_STARTING -> "Starting hotspot…"
+            ServerState.SHARING -> "Hotspot credentials shared"
+            ServerState.PAUSED_FOR_AUDIO -> "Paused for Bluetooth audio"
+            ServerState.DEGRADED -> "Bluetooth sharing needs attention"
+            ServerState.STOPPED -> "Stopping hotspot sharing…"
+        }
+
         return NotificationCompat.Builder(this, SERVICE_CHANNEL_ID)
             .setContentTitle("Hotspot sharing active")
-            .setContentText("Click here to open app")
+            .setContentText(statusText)
             .setSmallIcon(R.drawable.ic_launcher_notification)
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .setContentIntent(pendingIntent)
@@ -648,6 +889,12 @@ class BleHotspotService : Service() {
             .setOnlyAlertOnce(true)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
+            .addAction(
+                0,
+                if (pausedForAudio) "Resume" else "Pause 30s",
+                pausePendingIntent
+            )
+            .addAction(0, "Stop", stopPendingIntent)
             .setDeleteIntent(reshowPendingIntent)
             .build().apply {
                 flags = flags or Notification.FLAG_ONGOING_EVENT or Notification.FLAG_NO_CLEAR

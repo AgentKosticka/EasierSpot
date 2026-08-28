@@ -12,7 +12,7 @@ import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
 import android.net.wifi.WifiManager
-import android.net.wifi.WifiNetworkSpecifier
+import android.net.wifi.WifiInfo
 import android.net.wifi.WifiNetworkSuggestion
 import android.os.Bundle
 import android.provider.Settings
@@ -31,18 +31,22 @@ import com.agentkosticka.easierspot.R
 import com.agentkosticka.easierspot.ble.client.BleScanner
 import com.agentkosticka.easierspot.ble.client.GattClient
 import com.agentkosticka.easierspot.data.model.HotspotCredentials
+import com.agentkosticka.easierspot.hotspot.HotspotManager
 import com.agentkosticka.easierspot.ui.settings.AppPreferences
 import com.agentkosticka.easierspot.ui.settings.SettingsActivity
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withContext
 
 class ClientActivity : AppCompatActivity() {
     companion object {
         private const val TAG = "ClientActivity"
         private const val ADD_WIFI_RESULT_SUCCESS = 0
+        private const val ADD_WIFI_RESULT_ALREADY_EXISTS = 2
     }
     
     private lateinit var bleScanner: BleScanner
@@ -52,11 +56,12 @@ class ClientActivity : AppCompatActivity() {
     private lateinit var scanButton: Button
     private var connectionStatusDialog: AlertDialog? = null
     private var connectionStatusTextView: android.widget.TextView? = null
-    private var hotspotNetworkCallback: ConnectivityManager.NetworkCallback? = null
     private var suggestionNetworkCallback: ConnectivityManager.NetworkCallback? = null
     private var suggestionFallbackJob: Job? = null
     private var addNetworkStabilityJob: Job? = null
     private var suggestionPostConnectReceiver: BroadcastReceiver? = null
+    private var suggestionApprovalListener: WifiManager.SuggestionUserApprovalStatusListener? = null
+    private var suggestionConnectionListener: WifiManager.SuggestionConnectionStatusListener? = null
     private var isConnecting = false
     private var pendingCredentials: HotspotCredentials? = null
     private var pendingSuggestionCredentials: HotspotCredentials? = null
@@ -65,6 +70,8 @@ class ClientActivity : AppCompatActivity() {
     private var addNetworkStabilityCredentials: HotspotCredentials? = null
     private var addNetworkFlowStartTime: Long = 0L
     private var addNetworkRetryCount = 0
+    private var observedWifiSsid: String = ""
+    private var usingWifiSuggestion = false
     private val enableBluetoothLauncher =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
             if (result.resultCode == RESULT_OK) {
@@ -89,6 +96,7 @@ class ClientActivity : AppCompatActivity() {
 
         bleScanner = BleScanner(this)
         gattClient = GattClient(this)
+        registerSuggestionStatusListeners()
 
         scanButton = findViewById(R.id.btn_scan)
         val settingsButton = findViewById<android.widget.ImageButton>(R.id.btn_client_settings)
@@ -224,6 +232,14 @@ class ClientActivity : AppCompatActivity() {
             }
         }
 
+        lifecycleScope.launch {
+            gattClient.pairingCode.collect { code ->
+                if (!code.isNullOrBlank() && isConnecting) {
+                    showConnectionStatus("Compare pairing code on both devices: $code")
+                }
+            }
+        }
+
         registerSuggestionPostConnectReceiver()
     }
 
@@ -302,7 +318,10 @@ class ClientActivity : AppCompatActivity() {
 
         @Suppress("DEPRECATION")
         val resultList = data?.getIntArrayExtra(Settings.EXTRA_WIFI_NETWORK_RESULT_LIST)
-        val allSucceeded = resultList?.all { it == ADD_WIFI_RESULT_SUCCESS } ?: true
+        val allSucceeded = resultList?.isNotEmpty() == true &&
+            resultList.all {
+                it == ADD_WIFI_RESULT_SUCCESS || it == ADD_WIFI_RESULT_ALREADY_EXISTS
+            }
         Log.d(TAG, "handleAddWifiNetworksResult: allSucceeded=$allSucceeded, resultList=${resultList?.toList()}")
         if (!allSucceeded) {
             Log.w(TAG, "handleAddWifiNetworksResult: System could not add/connect ${credentials.ssid} reliably")
@@ -320,7 +339,11 @@ class ClientActivity : AppCompatActivity() {
         // Just verify and log status
         Log.d(TAG, "handleAddWifiNetworksResult: Add-network accepted for ${credentials.ssid}; monitoring already active")
         Log.d(TAG, "handleAddWifiNetworksResult: Verified addNetworkStabilityCredentials=${addNetworkStabilityCredentials?.ssid}")
-        showConnectionStatus("System accepted ${credentials.ssid}. Waiting for connection...")
+        if (isConnectedToSsid(credentials.ssid)) {
+            showConnected(credentials, isTargetWifiValidated(credentials.ssid))
+        } else {
+            showConnectionStatus("System accepted ${credentials.ssid}. Waiting for device-wide connection...")
+        }
     }
 
     private fun connectToServer(server: com.agentkosticka.easierspot.ble.client.DiscoveredServer) {
@@ -335,9 +358,13 @@ class ClientActivity : AppCompatActivity() {
     private fun hasRequiredPermissions(): Boolean {
         val hasScan = ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED
         val hasConnect = ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
-        val hasLocation = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
-        Log.d(TAG, "Permissions - Scan: $hasScan, Connect: $hasConnect, Location: $hasLocation")
-        return hasScan && hasConnect && hasLocation
+        val hasWifi = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            ContextCompat.checkSelfPermission(this, Manifest.permission.NEARBY_WIFI_DEVICES) == PackageManager.PERMISSION_GRANTED
+        } else {
+            ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        }
+        Log.d(TAG, "Permissions - Scan: $hasScan, Connect: $hasConnect, Wi-Fi nearby: $hasWifi")
+        return hasScan && hasConnect && hasWifi
     }
 
     private fun connectToHotspot(credentials: HotspotCredentials) {
@@ -360,22 +387,43 @@ class ClientActivity : AppCompatActivity() {
             return
         }
 
-        Log.d(TAG, "connectToHotspot: SDK >= R, using add-network path for ${credentials.ssid}")
-        prepareWifiHandoffForAddNetworks(credentials)
-        val addNetworksStarted = connectToHotspotViaAddNetworks(credentials)
-        if (addNetworksStarted) {
+        if (isConnectedToSsid(credentials.ssid)) {
+            Log.d(TAG, "Already connected to ${credentials.ssid}")
+            pendingSuggestionCredentials = null
+            showConnected(credentials, internetValidated = isTargetWifiValidated(credentials.ssid))
             return
         }
 
-        prepareFastWifiHandoff(credentials)
-        val suggestionStarted = connectToHotspotViaSuggestion(credentials)
-        if (suggestionStarted) {
-            showConnectionStatus("Add-network unavailable. Using suggestion for ${credentials.ssid}...")
-            return
+        // Shizuku's shell UID can ask WifiService to add a saved network and switch the whole
+        // device. This avoids WifiNetworkSpecifier's app-only routing and the suggestion API's
+        // OEM-dependent delay before Android's network selector chooses the hotspot.
+        usingWifiSuggestion = false
+        pendingSuggestionCredentials = credentials
+        showConnectionStatus("Switching this device to ${credentials.ssid}...")
+        monitorSuggestionConnection(credentials)
+        lifecycleScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                HotspotManager(applicationContext).connectDeviceToWifi(credentials)
+            }
+            if (pendingSuggestionCredentials != credentials || isConnectedToSsid(credentials.ssid)) {
+                if (isConnectedToSsid(credentials.ssid)) {
+                    showConnected(credentials, isTargetWifiValidated(credentials.ssid))
+                }
+                return@launch
+            }
+            if (result.accepted) {
+                Log.d(TAG, "Privileged whole-device Wi-Fi switch accepted")
+                showConnectionStatus("Android is switching to ${credentials.ssid}...")
+                scheduleSavedNetworkFallback(credentials, 18_000L)
+            } else {
+                Log.w(TAG, "Privileged Wi-Fi switch unavailable: ${result.detail}")
+                showConnectionStatus("Confirm the saved Wi-Fi connection in Android...")
+                if (!connectToHotspotViaAddNetworks(credentials)) {
+                    val suggestionStarted = connectToHotspotViaSuggestion(credentials)
+                    if (!suggestionStarted) showSavedNetworkFallbackDialog(credentials)
+                }
+            }
         }
-
-        showTemporaryConnectionFallbackDialog(credentials)
-        return
     }
 
     private fun connectToHotspotViaSuggestion(credentials: HotspotCredentials): Boolean {
@@ -383,37 +431,87 @@ class ClientActivity : AppCompatActivity() {
         val suggestion = buildNetworkSuggestion(credentials)
 
         val firstStatus = wifiManager.addNetworkSuggestions(listOf(suggestion))
-        val finalStatus = if (firstStatus == WifiManager.STATUS_NETWORK_SUGGESTIONS_ERROR_ADD_DUPLICATE) {
-            wifiManager.removeNetworkSuggestions(listOf(suggestion))
-            wifiManager.addNetworkSuggestions(listOf(suggestion))
-        } else {
-            firstStatus
-        }
+        val finalStatus = firstStatus
 
-        if (finalStatus != WifiManager.STATUS_NETWORK_SUGGESTIONS_SUCCESS) {
+        if (finalStatus != WifiManager.STATUS_NETWORK_SUGGESTIONS_SUCCESS &&
+            finalStatus != WifiManager.STATUS_NETWORK_SUGGESTIONS_ERROR_ADD_DUPLICATE
+        ) {
             Log.w(TAG, "WifiNetworkSuggestion failed with status=$finalStatus")
             showConnectionStatus("System Wi-Fi suggestion failed (status=$finalStatus)")
             return false
         }
 
         pendingSuggestionCredentials = credentials
+        usingWifiSuggestion = true
         showConnectionStatus("Waiting for Android to connect to ${credentials.ssid}...")
 
         monitorSuggestionConnection(credentials)
 
-        suggestionFallbackJob?.cancel()
-        suggestionFallbackJob = lifecycleScope.launch {
-            delay(25000)
-            if (pendingSuggestionCredentials == credentials) {
-                Log.w(TAG, "Suggestion connection timed out; waiting for user fallback choice")
-                showConnectionStatus("Still waiting for system connection to ${credentials.ssid}")
-                runOnUiThread {
-                    showTemporaryConnectionFallbackDialog(credentials)
-                }
-            }
-        }
+        scheduleSavedNetworkFallback(credentials, 25_000L)
 
         return true
+    }
+
+    private fun scheduleSavedNetworkFallback(credentials: HotspotCredentials, timeoutMs: Long) {
+        suggestionFallbackJob?.cancel()
+        suggestionFallbackJob = lifecycleScope.launch {
+            delay(timeoutMs)
+            if (pendingSuggestionCredentials == credentials && !isConnectedToSsid(credentials.ssid)) {
+                Log.w(TAG, "Device-wide connection timed out; offering saved-network fallback")
+                showConnectionStatus("Android has not switched to ${credentials.ssid}")
+                showSavedNetworkFallbackDialog(credentials)
+            }
+        }
+    }
+
+    private fun registerSuggestionStatusListeners() {
+        val hasWifiPermission = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            ContextCompat.checkSelfPermission(this, Manifest.permission.NEARBY_WIFI_DEVICES) == PackageManager.PERMISSION_GRANTED
+        } else {
+            ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        }
+        if (!hasWifiPermission) return
+        val wifiManager = applicationContext.getSystemService(WIFI_SERVICE) as WifiManager
+        suggestionApprovalListener = WifiManager.SuggestionUserApprovalStatusListener { status ->
+            if (!usingWifiSuggestion) return@SuggestionUserApprovalStatusListener
+            val credentials = pendingSuggestionCredentials ?: return@SuggestionUserApprovalStatusListener
+            when (status) {
+                WifiManager.STATUS_SUGGESTION_APPROVAL_PENDING ->
+                    showConnectionStatus("Approve EasierSpot's Wi-Fi suggestion to join ${credentials.ssid}")
+                WifiManager.STATUS_SUGGESTION_APPROVAL_REJECTED_BY_USER -> {
+                    suggestionFallbackJob?.cancel()
+                    showConnectionStatus("Automatic Wi-Fi joining is not allowed for EasierSpot")
+                    showSavedNetworkFallbackDialog(credentials)
+                }
+                WifiManager.STATUS_SUGGESTION_APPROVAL_APPROVED_BY_USER,
+                WifiManager.STATUS_SUGGESTION_APPROVAL_APPROVED_BY_CARRIER_PRIVILEGE ->
+                    showConnectionStatus("Wi-Fi suggestion approved. Waiting for ${credentials.ssid}...")
+            }
+        }
+        suggestionConnectionListener = WifiManager.SuggestionConnectionStatusListener { suggestion, status ->
+            if (!usingWifiSuggestion) return@SuggestionConnectionStatusListener
+            val credentials = pendingSuggestionCredentials ?: return@SuggestionConnectionStatusListener
+            if (suggestion.ssid != credentials.ssid) return@SuggestionConnectionStatusListener
+            suggestionFallbackJob?.cancel()
+            val reason = when (status) {
+                WifiManager.STATUS_SUGGESTION_CONNECTION_FAILURE_AUTHENTICATION -> "authentication failed"
+                WifiManager.STATUS_SUGGESTION_CONNECTION_FAILURE_ASSOCIATION -> "the device could not associate"
+                WifiManager.STATUS_SUGGESTION_CONNECTION_FAILURE_IP_PROVISIONING -> "IP address setup failed"
+                else -> "Android could not connect"
+            }
+            showConnectionStatus("Wi-Fi connection failed: $reason")
+            showSavedNetworkFallbackDialog(credentials)
+        }
+        try {
+            suggestionApprovalListener?.let {
+                wifiManager.addSuggestionUserApprovalStatusListener(mainExecutor, it)
+            }
+            suggestionConnectionListener?.let {
+                wifiManager.addSuggestionConnectionStatusListener(mainExecutor, it)
+            }
+        } catch (securityException: SecurityException) {
+            Log.w(TAG, "Cannot register Wi-Fi suggestion status listeners", securityException)
+        }
     }
 
     private fun connectToHotspotViaAddNetworks(credentials: HotspotCredentials): Boolean {
@@ -438,51 +536,45 @@ class ClientActivity : AppCompatActivity() {
         monitorSuggestionConnection(credentials)
         
         showConnectionStatus("Confirm connection to ${credentials.ssid} in system dialog...")
-        addWifiNetworksLauncher.launch(intent)
-        return true
+        return try {
+            addWifiNetworksLauncher.launch(intent)
+            true
+        } catch (error: Exception) {
+            Log.w(TAG, "Saved-network system flow is unavailable", error)
+            pendingAddNetworksCredentials = null
+            awaitingAddNetworkConnectionCredentials = null
+            addNetworkStabilityCredentials = null
+            addNetworkFlowStartTime = 0L
+            false
+        }
     }
 
     private fun prepareWifiHandoffForAddNetworks(credentials: HotspotCredentials) {
-        Log.d(TAG, "prepareWifiHandoffForAddNetworks: Entry for SSID=${credentials.ssid}")
-        val wifiManager = applicationContext.getSystemService(WIFI_SERVICE) as WifiManager
-        val suggestion = buildNetworkSuggestion(credentials)
-        runCatching {
-            wifiManager.removeNetworkSuggestions(listOf(suggestion))
-            Log.d(TAG, "prepareWifiHandoffForAddNetworks: Removed previous suggestions for ${credentials.ssid}")
-        }.onFailure {
-            Log.d(TAG, "prepareWifiHandoffForAddNetworks: Could not clear previous suggestion for add-network ${credentials.ssid}: ${it.message}")
-        }
-        Log.d(TAG, "prepareWifiHandoffForAddNetworks: Prepared add-network handoff for ${credentials.ssid} without forced disconnect")
+        // ACTION_WIFI_ADD_NETWORKS is independent from the suggestion API. Keep the suggestion in
+        // place so Android can continue auto-join evaluation while the saved-network flow runs.
+        Log.d(TAG, "Prepared saved-network fallback for ${credentials.ssid}")
     }
 
     private fun prepareFastWifiHandoff(credentials: HotspotCredentials) {
-        Log.d(TAG, "prepareFastWifiHandoff: Entry for SSID=${credentials.ssid}")
-        val wifiManager = applicationContext.getSystemService(WIFI_SERVICE) as WifiManager
-        val suggestion = buildNetworkSuggestion(credentials)
-
-        runCatching {
-            wifiManager.removeNetworkSuggestions(listOf(suggestion))
-            Log.d(TAG, "prepareFastWifiHandoff: Called removeNetworkSuggestions() for ${credentials.ssid}")
-        }.onFailure {
-            Log.d(TAG, "prepareFastWifiHandoff: Could not clear previous suggestion for ${credentials.ssid}: ${it.message}")
-        }
-
-        @Suppress("DEPRECATION")
-        val disconnected = runCatching { wifiManager.disconnect() }.getOrDefault(false)
-        Log.d(TAG, "prepareFastWifiHandoff: Called wifiManager.disconnect() with result=$disconnected for ${credentials.ssid}")
-        if (disconnected) {
-            Log.d(TAG, "prepareFastWifiHandoff: Pre-join Wi-Fi disconnect requested for fast handoff to ${credentials.ssid}")
-        } else {
-            Log.w(TAG, "prepareFastWifiHandoff: Wi-Fi disconnect failed or returned false for ${credentials.ssid}")
-        }
+        // Deliberately do not disconnect the user's current network or remove a working
+        // suggestion. Android's network selector performs the handoff when the new suggestion is
+        // approved and suitable.
+        Log.d(TAG, "Prepared non-disruptive Wi-Fi handoff for ${credentials.ssid}")
     }
 
     private fun buildNetworkSuggestion(credentials: HotspotCredentials): WifiNetworkSuggestion {
         return WifiNetworkSuggestion.Builder()
             .setSsid(credentials.ssid)
+            .setIsHiddenSsid(credentials.isHidden)
+            .setIsInitialAutojoinEnabled(true)
             .apply {
-                if (credentials.password.isNotEmpty()) {
-                    setWpa2Passphrase(credentials.password)
+                when (credentials.securityType) {
+                    HotspotCredentials.SecurityType.OPEN -> Unit
+                    HotspotCredentials.SecurityType.WPA2_PSK,
+                    HotspotCredentials.SecurityType.WPA3_TRANSITION ->
+                        setWpa2Passphrase(credentials.password)
+                    HotspotCredentials.SecurityType.WPA3_SAE ->
+                        setWpa3Passphrase(credentials.password)
                 }
             }
             .build()
@@ -491,17 +583,23 @@ class ClientActivity : AppCompatActivity() {
     private fun monitorSuggestionConnection(credentials: HotspotCredentials) {
         val connectivityManager = getSystemService(ConnectivityManager::class.java)
         suggestionNetworkCallback?.let { runCatching { connectivityManager.unregisterNetworkCallback(it) } }
+        observedWifiSsid = ""
+        var handledTargetNetwork: Network? = null
 
-        val callback = object : ConnectivityManager.NetworkCallback() {
+        val callback = object : ConnectivityManager.NetworkCallback(
+            ConnectivityManager.NetworkCallback.FLAG_INCLUDE_LOCATION_INFO
+        ) {
             override fun onAvailable(network: Network) {
                 Log.d(TAG, "monitorSuggestionConnection.onAvailable: Network available for ${credentials.ssid}")
-                val wifiManager = applicationContext.getSystemService(WIFI_SERVICE) as WifiManager
-                val currentSsid = normalizeSsid(wifiManager.connectionInfo?.ssid)
+                val currentSsid = ssidForNetwork(network).ifBlank { observedWifiSsid }
+                if (currentSsid.isNotBlank()) observedWifiSsid = currentSsid
                 Log.d(TAG, "monitorSuggestionConnection.onAvailable: currentSsid=$currentSsid, expectedSsid=${credentials.ssid}")
                 if (currentSsid != credentials.ssid) {
                     Log.w(TAG, "monitorSuggestionConnection.onAvailable: SSID mismatch, early return (current=$currentSsid, expected=${credentials.ssid})")
                     return
                 }
+                if (handledTargetNetwork == network) return
+                handledTargetNetwork = network
 
                 val caps = connectivityManager.getNetworkCapabilities(network)
                 val hasInternet = caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
@@ -525,9 +623,7 @@ class ClientActivity : AppCompatActivity() {
                                 }
                                 delay(1500)
                                 Log.d(TAG, "StabilityGate: Checking SSID after 1.5s delay for ${credentials.ssid}")
-                                val refreshedWifiManager = applicationContext.getSystemService(WIFI_SERVICE) as WifiManager
-                                @Suppress("DEPRECATION")
-                                val stableSsid = normalizeSsid(refreshedWifiManager.connectionInfo?.ssid)
+                                val stableSsid = currentConnectedWifiSsid()
                                 Log.d(TAG, "StabilityGate: stableSsid=$stableSsid, expectedSsid=${credentials.ssid}")
                                 if (stableSsid == credentials.ssid) {
                                     addNetworkStabilityCredentials = null
@@ -598,25 +694,30 @@ class ClientActivity : AppCompatActivity() {
                     return
                 }
 
-                runOnUiThread {
-                    val message = if (validated) {
-                        "Connected to ${credentials.ssid} (internet validated)"
-                    } else if (hasInternet) {
-                        "Connected to ${credentials.ssid} (internet pending validation)"
-                    } else {
-                        "Connected to ${credentials.ssid}, but no upstream internet"
+                showConnected(credentials, validated, hasInternet)
+            }
+
+            override fun onCapabilitiesChanged(network: Network, capabilities: NetworkCapabilities) {
+                val wifiInfo = capabilities.transportInfo as? WifiInfo ?: return
+                observedWifiSsid = normalizeSsid(wifiInfo.ssid)
+                if (observedWifiSsid == credentials.ssid) {
+                    onAvailable(network)
+                }
+            }
+
+            override fun onLost(network: Network) {
+                if (handledTargetNetwork == network) handledTargetNetwork = null
+                if (pendingSuggestionCredentials?.ssid == credentials.ssid) {
+                    observedWifiSsid = ""
+                    runOnUiThread {
+                        showConnectionStatus("Connection to ${credentials.ssid} was lost")
                     }
-                    showConnectionStatus(message)
-                    dismissConnectionStatus()
-                    Toast.makeText(this@ClientActivity, message, Toast.LENGTH_LONG).show()
                 }
             }
 
             override fun onUnavailable() {
                 // Get current SSID for verification
-                val currentWifiManager = applicationContext.getSystemService(WIFI_SERVICE) as WifiManager
-                @Suppress("DEPRECATION")
-                val currentSsid = normalizeSsid(currentWifiManager.connectionInfo?.ssid)
+                val currentSsid = currentConnectedWifiSsid().ifBlank { observedWifiSsid }
                 
                 val timeSinceFlowStart = if (addNetworkFlowStartTime > 0) {
                     System.currentTimeMillis() - addNetworkFlowStartTime
@@ -674,78 +775,125 @@ class ClientActivity : AppCompatActivity() {
             .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
             .build()
         connectivityManager.registerNetworkCallback(req, callback)
-    }
-
-    private fun connectToHotspotViaSpecifier(credentials: HotspotCredentials) {
-        val connectivityManager = getSystemService(ConnectivityManager::class.java)
-
-        val specifierBuilder = WifiNetworkSpecifier.Builder()
-            .setSsid(credentials.ssid)
-
-        if (credentials.password.isNotEmpty()) {
-            specifierBuilder.setWpa2Passphrase(credentials.password)
+        findTargetWifiNetwork(credentials.ssid)?.let { (network, capabilities) ->
+            callback.onCapabilitiesChanged(network, capabilities)
         }
-
-        val networkRequest = NetworkRequest.Builder()
-            .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
-            .setNetworkSpecifier(specifierBuilder.build())
-            .build()
-
-        hotspotNetworkCallback?.let {
-            runCatching { connectivityManager.unregisterNetworkCallback(it) }
-        }
-
-        val callback = object : ConnectivityManager.NetworkCallback() {
-            override fun onAvailable(network: Network) {
-                super.onAvailable(network)
-                connectivityManager.bindProcessToNetwork(network)
-                Log.d(TAG, "Connected to hotspot network: ${credentials.ssid}")
-                runOnUiThread {
-                    Toast.makeText(
-                        this@ClientActivity,
-                        "Connected via app to ${credentials.ssid}",
-                        Toast.LENGTH_LONG
-                    ).show()
-                }
-            }
-
-            override fun onUnavailable() {
-                super.onUnavailable()
-                Log.w(TAG, "connectToHotspotViaSpecifier.onUnavailable: Network unavailable for ${credentials.ssid}, calling bindProcessToNetwork(null)")
-                connectivityManager.bindProcessToNetwork(null)
-                Log.w(TAG, "connectToHotspotViaSpecifier.onUnavailable: Hotspot network unavailable: ${credentials.ssid}")
-                runOnUiThread {
-                    Toast.makeText(
-                        this@ClientActivity,
-                        "Could not connect to ${credentials.ssid}",
-                        Toast.LENGTH_LONG
-                    ).show()
-                }
-            }
-        }
-        hotspotNetworkCallback = callback
-        connectivityManager.requestNetwork(networkRequest, callback)
     }
 
     private fun normalizeSsid(raw: String?): String {
         if (raw.isNullOrBlank()) return ""
-        return raw.removePrefix("\"").removeSuffix("\"")
+        val normalized = raw.removePrefix("\"").removeSuffix("\"")
+        return if (normalized == WifiManager.UNKNOWN_SSID) "" else normalized
+    }
+
+    private fun ssidForNetwork(network: Network): String {
+        val capabilities = getSystemService(ConnectivityManager::class.java)
+            .getNetworkCapabilities(network)
+        return normalizeSsid((capabilities?.transportInfo as? WifiInfo)?.ssid)
+    }
+
+    @Suppress("DEPRECATION")
+    private fun findTargetWifiNetwork(ssid: String): Pair<Network, NetworkCapabilities>? {
+        val connectivityManager = getSystemService(ConnectivityManager::class.java)
+        return connectivityManager.allNetworks.firstNotNullOfOrNull { network ->
+            val capabilities = connectivityManager.getNetworkCapabilities(network)
+                ?: return@firstNotNullOfOrNull null
+            if (!capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) {
+                return@firstNotNullOfOrNull null
+            }
+            val connectedSsid = normalizeSsid((capabilities.transportInfo as? WifiInfo)?.ssid)
+            if (connectedSsid == ssid) network to capabilities else null
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun currentConnectedWifiSsid(): String {
+        val connectivityManager = getSystemService(ConnectivityManager::class.java)
+        val activeNetwork = connectivityManager.activeNetwork
+        if (activeNetwork != null) {
+            val activeSsid = ssidForNetwork(activeNetwork)
+            if (activeSsid.isNotBlank()) return activeSsid
+        }
+        connectivityManager.allNetworks.forEach { network ->
+            val ssid = ssidForNetwork(network)
+            if (ssid.isNotBlank()) return ssid
+        }
+        val wifiManager = applicationContext.getSystemService(WIFI_SERVICE) as WifiManager
+        return runCatching { normalizeSsid(wifiManager.connectionInfo?.ssid) }.getOrDefault("")
+    }
+
+    private fun isConnectedToSsid(ssid: String): Boolean =
+        findTargetWifiNetwork(ssid) != null || currentConnectedWifiSsid() == ssid
+
+    private fun isTargetWifiValidated(ssid: String): Boolean =
+        findTargetWifiNetwork(ssid)?.second
+            ?.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) == true
+
+    private fun showConnected(
+        credentials: HotspotCredentials,
+        internetValidated: Boolean,
+        hasInternetCapability: Boolean = true
+    ) {
+        pendingSuggestionCredentials = null
+        usingWifiSuggestion = false
+        suggestionFallbackJob?.cancel()
+        addNetworkStabilityCredentials = null
+        awaitingAddNetworkConnectionCredentials = null
+        addNetworkFlowStartTime = 0L
+        val callback = suggestionNetworkCallback
+        suggestionNetworkCallback = null
+        if (callback != null) {
+            runCatching {
+                getSystemService(ConnectivityManager::class.java).unregisterNetworkCallback(callback)
+            }
+        }
+        runOnUiThread {
+            val message = when {
+                internetValidated -> "Connected to ${credentials.ssid}"
+                hasInternetCapability -> "Connected to ${credentials.ssid}; checking internet..."
+                else -> "Connected to ${credentials.ssid}, but no upstream internet"
+            }
+            showConnectionStatus(message)
+            dismissConnectionStatus()
+            Toast.makeText(this@ClientActivity, message, Toast.LENGTH_LONG).show()
+        }
     }
 
     private fun showTemporaryConnectionFallbackDialog(credentials: HotspotCredentials) {
         if (isFinishing || isDestroyed) return
 
         AlertDialog.Builder(this)
-            .setTitle("Use temporary app connection?")
+            .setTitle("Wi-Fi connection needs confirmation")
             .setMessage(
-                "System Wi-Fi connection did not complete yet. " +
-                    "You can try a temporary app-scoped connection now (may not provide full-device internet)."
+                "Android did not complete the device-wide switch. Try the saved-network prompt " +
+                    "again, or select ${credentials.ssid} in Wi-Fi settings."
             )
-            .setPositiveButton("Try Temporary") { _: DialogInterface, _: Int ->
-                showConnectionStatus("Trying temporary app connection...")
-                connectToHotspotViaSpecifier(credentials)
+            .setPositiveButton("Try again") { _: DialogInterface, _: Int ->
+                connectToHotspotViaAddNetworks(credentials)
             }
-            .setNegativeButton("Keep Waiting", null)
+            .setNeutralButton("Wi-Fi settings") { _, _ ->
+                startActivity(Intent(Settings.ACTION_WIFI_SETTINGS))
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun showSavedNetworkFallbackDialog(credentials: HotspotCredentials) {
+        if (isFinishing || isDestroyed) return
+        AlertDialog.Builder(this)
+            .setTitle("Automatic connection needs help")
+            .setMessage(
+                "Android has not joined ${credentials.ssid}. Save it as a normal Wi-Fi network, " +
+                    "or select it in Wi-Fi settings."
+            )
+            .setPositiveButton("Save network") { _, _ ->
+                prepareWifiHandoffForAddNetworks(credentials)
+                connectToHotspotViaAddNetworks(credentials)
+            }
+            .setNeutralButton("Wi-Fi settings") { _, _ ->
+                startActivity(Intent(Settings.ACTION_WIFI_SETTINGS))
+            }
+            .setNegativeButton("Cancel", null)
             .show()
     }
 
@@ -776,30 +924,16 @@ class ClientActivity : AppCompatActivity() {
             runCatching { unregisterReceiver(it) }
         }
         suggestionPostConnectReceiver = null
-        
-        // CRITICAL FIX: Check if add-network connection is pending before unbinding
-        // Root cause of first-time disconnect: bindProcessToNetwork(null) was being called
-        // while the system dialog was open, disconnecting the network we just requested.
-        val isAddNetworkPending = pendingAddNetworksCredentials != null ||
-                                   awaitingAddNetworkConnectionCredentials != null ||
-                                   addNetworkStabilityCredentials != null
-        
-        hotspotNetworkCallback?.let {
-            runCatching {
-                if (!isAddNetworkPending) {
-                    Log.d(TAG, "onDestroy: No pending add-network connection - safe to unbind")
-                    getSystemService(ConnectivityManager::class.java).bindProcessToNetwork(null)
-                } else {
-                    Log.w(TAG, "onDestroy: *** SKIPPING bindProcessToNetwork(null) - add-network connection is pending! ***")
-                    Log.w(TAG, "onDestroy: This preserves the network binding during system dialog and stability gate.")
-                    // NOTE: The network binding will persist across activity recreation (e.g., rotation).
-                    // This is intentional to keep the Wi-Fi connection alive. Consider adding
-                    // android:configChanges="orientation|screenSize" to AndroidManifest.xml
-                    // to avoid activity recreation entirely during configuration changes.
-                }
-                getSystemService(ConnectivityManager::class.java).unregisterNetworkCallback(it)
-            }
+        val wifiManager = applicationContext.getSystemService(WIFI_SERVICE) as WifiManager
+        suggestionApprovalListener?.let {
+            runCatching { wifiManager.removeSuggestionUserApprovalStatusListener(it) }
         }
+        suggestionConnectionListener?.let {
+            runCatching { wifiManager.removeSuggestionConnectionStatusListener(it) }
+        }
+        suggestionApprovalListener = null
+        suggestionConnectionListener = null
+
         suggestionNetworkCallback?.let {
             Log.d(TAG, "onDestroy: Unregistering suggestionNetworkCallback")
             runCatching {

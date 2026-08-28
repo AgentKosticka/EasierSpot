@@ -96,10 +96,14 @@ class PermissionsActivity : AppCompatActivity() {
                 button = findViewById(R.id.btn_grant_bluetooth_group)
             ),
             PermissionGroupUi(
-                permissions = listOf(
-                    Manifest.permission.ACCESS_FINE_LOCATION,
-                    Manifest.permission.ACCESS_COARSE_LOCATION
-                ),
+                permissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    listOf(Manifest.permission.NEARBY_WIFI_DEVICES)
+                } else {
+                    listOf(
+                        Manifest.permission.ACCESS_FINE_LOCATION,
+                        Manifest.permission.ACCESS_COARSE_LOCATION
+                    )
+                },
                 button = findViewById(R.id.btn_grant_location_group)
             )
         )

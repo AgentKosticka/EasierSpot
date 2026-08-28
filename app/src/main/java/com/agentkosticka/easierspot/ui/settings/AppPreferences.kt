@@ -31,8 +31,8 @@ object AppPreferences {
     private const val DEFAULT_CONNECTION_NOTIFICATION_ENABLED = true
     private const val DEFAULT_NOTIFICATION_SOUND_ENABLED = true
     private const val DEFAULT_NOTIFICATION_VIBRATION_ENABLED = true
-    private const val DEFAULT_ADVERTISING_INTERVAL = "balanced"
-    private const val DEFAULT_BROADCAST_STRENGTH = "medium"
+    private const val DEFAULT_ADVERTISING_INTERVAL = "slow"
+    private const val DEFAULT_BROADCAST_STRENGTH = "low"
     private const val DEFAULT_SCAN_TIMEOUT_MS = 30000L
     private const val DEFAULT_AUTO_RETRY_ENABLED = true
     private const val DEFAULT_APPROVAL_POLICY = "ask"
@@ -46,7 +46,7 @@ object AppPreferences {
 
         companion object {
             fun fromValue(value: String?): AdvertisingInterval {
-                return entries.firstOrNull { it.value == value } ?: BALANCED
+                return entries.firstOrNull { it.value == value } ?: SLOW
             }
         }
     }
@@ -58,7 +58,7 @@ object AppPreferences {
 
         companion object {
             fun fromValue(value: String?): BroadcastStrength {
-                return entries.firstOrNull { it.value == value } ?: MEDIUM
+                return entries.firstOrNull { it.value == value } ?: LOW
             }
         }
     }

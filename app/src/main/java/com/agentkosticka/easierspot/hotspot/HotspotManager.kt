@@ -21,6 +21,7 @@ import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.lang.reflect.Method
 import java.lang.reflect.Proxy
+import java.util.concurrent.TimeUnit
 
 /**
  * Diagnostic result for hotspot configuration testing.
@@ -36,6 +37,11 @@ data class HotspotDiagnostics(
     val errorMessage: String?
 )
 
+data class WifiConnectResult(
+    val accepted: Boolean,
+    val detail: String
+)
+
 class HotspotManager(private val context: Context) {
     companion object {
         private const val TAG = "HotspotManager"
@@ -47,6 +53,43 @@ class HotspotManager(private val context: Context) {
 
     // Cached IWifiManager for reuse
     private var cachedWifiManager: IWifiManager? = null
+
+    /**
+     * Add the supplied network as a normal saved network and actively switch the whole device to
+     * it. The platform shell command uses WifiService.connect rather than an app-scoped request.
+     */
+    fun connectDeviceToWifi(credentials: HotspotCredentials): WifiConnectResult {
+        if (!isShizukuReady()) {
+            return WifiConnectResult(false, "Shizuku is unavailable")
+        }
+
+        val security = when (credentials.securityType) {
+            HotspotCredentials.SecurityType.OPEN -> "open"
+            HotspotCredentials.SecurityType.WPA3_SAE -> "wpa3"
+            HotspotCredentials.SecurityType.WPA2_PSK,
+            HotspotCredentials.SecurityType.WPA3_TRANSITION -> "wpa2"
+        }
+        val command = buildList {
+            add("/system/bin/cmd")
+            add("wifi")
+            add("connect-network")
+            add(credentials.ssid)
+            add(security)
+            if (security != "open") add(credentials.password)
+            if (credentials.isHidden) add("-h")
+        }.toTypedArray()
+        val result = runShizukuCommand(command)
+        val combined = listOf(result.stdout, result.stderr)
+            .filter { it.isNotBlank() }
+            .joinToString("; ")
+        val rejectedByWifiService = combined.contains("failed", ignoreCase = true) ||
+            combined.contains("error", ignoreCase = true) ||
+            combined.contains("unknown command", ignoreCase = true)
+        return WifiConnectResult(
+            accepted = result.exitCode == 0 && !rejectedByWifiService,
+            detail = combined.ifBlank { "exit=${result.exitCode}" }
+        )
+    }
 
     /**
      * Get the current hotspot configuration (SSID + password)
@@ -301,7 +344,11 @@ class HotspotManager(private val context: Context) {
             LogUtils.diag(TAG, "Extracted: ssid='$ssid', passphrase=${if (passphrase.isEmpty()) "(empty)" else "(set)"}")
             
             if (ssid.isNotEmpty()) {
-                HotspotCredentials(ssid, passphrase)
+                HotspotCredentials(
+                    ssid = ssid,
+                    password = passphrase,
+                    securityType = extractSecurityType(softApConfig, configClass)
+                )
             } else {
                 LogUtils.w(TAG, "SSID is empty after extraction")
                 null
@@ -351,6 +398,21 @@ class HotspotManager(private val context: Context) {
         }
     }
 
+    private fun extractSecurityType(
+        softApConfig: Any,
+        configClass: Class<*>
+    ): HotspotCredentials.SecurityType {
+        val rawType = runCatching {
+            configClass.getMethod("getSecurityType").invoke(softApConfig) as Int
+        }.getOrNull()
+        return when (rawType) {
+            0 -> HotspotCredentials.SecurityType.OPEN
+            2 -> HotspotCredentials.SecurityType.WPA3_TRANSITION
+            3 -> HotspotCredentials.SecurityType.WPA3_SAE
+            else -> HotspotCredentials.SecurityType.WPA2_PSK
+        }
+    }
+
     /**
      * Get or create the IWifiManager interface via Shizuku.
      */
@@ -389,23 +451,13 @@ class HotspotManager(private val context: Context) {
     private fun getHotspotCredentialsViaShell(): HotspotCredentials? {
         return try {
             LogUtils.diag(TAG, "Attempting shell command approach...")
-            
-            // Use Runtime to run command - when Shizuku is active, this has elevated perms
-            // This is a fallback; the AIDL approach should work better
-            val processBuilder = ProcessBuilder("cmd", "wifi", "get-softap-config")
-            processBuilder.redirectErrorStream(true)
-            val process = processBuilder.start()
-            val reader = BufferedReader(InputStreamReader(process.inputStream))
-            val output = reader.readText()
-            reader.close()
-            val exitCode = process.waitFor()
-            
-            LogUtils.diag(TAG, "Shell output (exit=$exitCode): $output")
-            
-            if (exitCode != 0 || output.isBlank()) {
+
+            val result = runShizukuCommand(arrayOf("cmd", "wifi", "get-softap-config"))
+            if (result.exitCode != 0 || result.stdout.isBlank()) {
                 LogUtils.w(TAG, "Shell command failed or returned empty")
                 return null
             }
+            val output = result.stdout
             
             // Parse output - format varies by Android version
             // Common format: "ssid=MyHotspot\npassphrase=MyPassword\n..."
@@ -550,11 +602,16 @@ class HotspotManager(private val context: Context) {
             return false
         }
 
-        // Give framework a brief moment to transition AP state.
-        Thread.sleep(700)
-        val enabled = isHotspotEnabled()
-        LogUtils.diag(TAG, "Hotspot enabled after connector start: $enabled")
-        return enabled
+        // A successful command only means the asynchronous request was accepted. The service
+        // observes SoftAP state separately before it reads or transmits credentials.
+        return true
+    }
+
+    /** Stop tethering only when the owning service has established that EasierSpot started it. */
+    fun stopHotspot(): Boolean {
+        if (!isHotspotEnabled()) return true
+        if (!isShizukuReady()) return false
+        return stopTetheringViaConnector() || stopTetheringViaShell()
     }
 
     /**
@@ -640,6 +697,33 @@ class HotspotManager(private val context: Context) {
             false
         } catch (e: Exception) {
             LogUtils.e(TAG, "startTetheringViaConnector failed: ${e.message}")
+            false
+        }
+    }
+
+    private fun stopTetheringViaShell(): Boolean {
+        val commands = listOf(
+            arrayOf("cmd", "connectivity", "tether", "stop", "wifi"),
+            arrayOf("cmd", "tethering", "stop", "wifi"),
+            arrayOf("cmd", "wifi", "stop-softap")
+        )
+        return commands.any { command ->
+            runShizukuCommand(command).exitCode == 0
+        }
+    }
+
+    private fun stopTetheringViaConnector(): Boolean {
+        return try {
+            val connector = getTetheringConnector() ?: return false
+            connector.javaClass.methods
+                .filter { it.name == "stopTethering" }
+                .sortedByDescending { scoreTetheringMethod(it) }
+                .any { method ->
+                    val args = buildTetheringArgs(method, isStart = false) ?: return@any false
+                    runCatching { method.invoke(connector, *args) }.isSuccess
+                }
+        } catch (error: Exception) {
+            LogUtils.e(TAG, "stopTetheringViaConnector failed", error)
             false
         }
     }
@@ -877,9 +961,14 @@ class HotspotManager(private val context: Context) {
                 ctor.isAccessible = true
                 ctor.newInstance(remoteProcess) as Process
             }
+            val completed = process.waitFor(10, TimeUnit.SECONDS)
+            if (!completed) {
+                process.destroy()
+                return CommandResult(-1, "", "command timed out")
+            }
             val stdout = BufferedReader(InputStreamReader(process.inputStream)).use { it.readText() }
             val stderr = BufferedReader(InputStreamReader(process.errorStream)).use { it.readText() }
-            val exitCode = process.waitFor()
+            val exitCode = process.exitValue()
             CommandResult(exitCode, stdout.trim(), stderr.trim())
         } catch (e: Exception) {
             CommandResult(-1, "", e.message ?: "unknown error")

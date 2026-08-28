@@ -2,7 +2,7 @@ package com.agentkosticka.easierspot.ble.client
 
 import android.Manifest
 import android.annotation.SuppressLint
-import android.bluetooth.BluetoothAdapter
+import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothManager
 import android.bluetooth.le.BluetoothLeScanner
 import android.bluetooth.le.ScanCallback
@@ -11,204 +11,194 @@ import android.bluetooth.le.ScanResult
 import android.bluetooth.le.ScanSettings
 import android.content.Context
 import android.content.pm.PackageManager
+import android.os.Handler
+import android.os.Looper
 import android.os.ParcelUuid
-import android.util.Log
 import androidx.core.content.ContextCompat
 import com.agentkosticka.easierspot.ble.BleConstants
 import com.agentkosticka.easierspot.ui.settings.AppPreferences
+import com.agentkosticka.easierspot.util.LogUtils
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import android.os.Handler
-import android.os.Looper
 
 data class DiscoveredServer(
     val deviceId: String,
     val deviceName: String?,
     val rssi: Int,
-    val bluetoothDevice: android.bluetooth.BluetoothDevice
+    val bluetoothDevice: BluetoothDevice
 )
 
+/** Foreground, bounded scanner with a short fast phase and throttled result updates. */
 @SuppressLint("MissingPermission")
 class BleScanner(private val context: Context) {
     companion object {
         private const val TAG = "BleScanner"
+        private const val RESULT_THROTTLE_MS = 1_000L
+        private const val MIN_RSSI_CHANGE_DB = 4
     }
-    
-    private val bluetoothManager = context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
-    private val bluetoothAdapter: BluetoothAdapter? = bluetoothManager.adapter
+
+    private val adapter = (context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager).adapter
+    private val handler = Handler(Looper.getMainLooper())
     private var scanner: BluetoothLeScanner? = null
     private var scanCallback: ScanCallback? = null
+    private var activeMode = ScanSettings.SCAN_MODE_LOW_LATENCY
 
     private val _discoveredServers = MutableStateFlow<List<DiscoveredServer>>(emptyList())
     val discoveredServers: StateFlow<List<DiscoveredServer>> = _discoveredServers.asStateFlow()
-
     private val _isScanning = MutableStateFlow(false)
     val isScanning: StateFlow<Boolean> = _isScanning.asStateFlow()
-
     private val _scanError = MutableStateFlow<String?>(null)
     val scanError: StateFlow<String?> = _scanError.asStateFlow()
 
-    private val foundDevices = mutableMapOf<String, DiscoveredServer>()
-    private val scanTimeoutHandler = Handler(Looper.getMainLooper())
-    private var scanTimeoutRunnable: Runnable? = null
+    private val foundDevices = linkedMapOf<String, DiscoveredServer>()
+    private val lastPublishedAt = mutableMapOf<String, Long>()
+    private val stopRunnable = Runnable { stopScan() }
+    private val balancedRunnable = Runnable {
+        if (_isScanning.value && activeMode == ScanSettings.SCAN_MODE_LOW_LATENCY) {
+            restartInMode(ScanSettings.SCAN_MODE_BALANCED)
+        }
+    }
 
-    fun isBluetoothEnabled(): Boolean = bluetoothAdapter?.isEnabled == true
-    
-    fun isBluetoothAvailable(): Boolean = bluetoothAdapter != null
+    fun isBluetoothEnabled(): Boolean = adapter?.isEnabled == true
+    fun isBluetoothAvailable(): Boolean = adapter != null
 
     fun startScan(onResult: (DiscoveredServer) -> Unit = {}) {
-        Log.d(TAG, "startScan() called")
-        
         if (!hasBluetoothPermissions()) {
-            Log.e(TAG, "Missing Bluetooth permissions")
-            _scanError.value = "Missing Bluetooth permissions"
+            fail("Missing Bluetooth scan/connect permission")
             return
         }
-
-        if (bluetoothAdapter == null) {
-            Log.e(TAG, "Bluetooth adapter not available")
-            _scanError.value = "Bluetooth not available on this device"
+        val currentAdapter = adapter
+        if (currentAdapter == null) {
+            fail("Bluetooth is not available on this device")
             return
         }
-
-        if (!bluetoothAdapter.isEnabled) {
-            Log.e(TAG, "Bluetooth is disabled")
-            _scanError.value = "Bluetooth is disabled"
+        if (!currentAdapter.isEnabled) {
+            fail("Bluetooth is disabled")
             return
         }
+        if (_isScanning.value) return
 
-        if (isScanning.value) {
-            Log.d(TAG, "Already scanning")
-            return
-        }
-
-        scanner = bluetoothAdapter.bluetoothLeScanner
+        scanner = currentAdapter.bluetoothLeScanner
         if (scanner == null) {
-            Log.e(TAG, "BLE scanner not available")
-            _scanError.value = "BLE not available"
+            fail("BLE scanner is unavailable")
             return
         }
 
         foundDevices.clear()
+        lastPublishedAt.clear()
         _discoveredServers.value = emptyList()
         _scanError.value = null
+        scanCallback = callback(onResult)
+        activeMode = ScanSettings.SCAN_MODE_LOW_LATENCY
+        if (!startCurrentScan()) return
 
-        Log.d(TAG, "Building scan filter for Service UUID: ${BleConstants.SERVICE_UUID}")
-        val scanFilter = ScanFilter.Builder()
-            .setServiceUuid(ParcelUuid(BleConstants.SERVICE_UUID))
+        _isScanning.value = true
+        val timeout = AppPreferences.getScanTimeoutMs(context)
+            .coerceIn(5_000L, 60_000L)
+        handler.postDelayed(balancedRunnable, BleConstants.SCAN_FAST_PHASE_MS.coerceAtMost(timeout))
+        handler.postDelayed(stopRunnable, timeout)
+    }
+
+    private fun restartInMode(mode: Int) {
+        val callback = scanCallback ?: return
+        runCatching { scanner?.stopScan(callback) }
+        activeMode = mode
+        if (!startCurrentScan()) stopScan()
+    }
+
+    private fun startCurrentScan(): Boolean {
+        val callback = scanCallback ?: return false
+        val serviceUuid = ParcelUuid(BleConstants.SERVICE_UUID)
+        val filter = ScanFilter.Builder()
+            .setServiceData(
+                serviceUuid,
+                byteArrayOf(BleConstants.PROTOCOL_VERSION),
+                byteArrayOf(0xFF.toByte())
+            )
             .build()
-
-        val scanSettings = ScanSettings.Builder()
-            .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
+        val settings = ScanSettings.Builder()
+            .setScanMode(activeMode)
             .setReportDelay(0)
             .build()
+        return try {
+            scanner?.startScan(listOf(filter), settings, callback)
+            LogUtils.i(TAG, "BLE scan active (mode=$activeMode)")
+            true
+        } catch (error: Exception) {
+            fail(error.message ?: "Unable to start BLE scan")
+            false
+        }
+    }
 
-        scanCallback = object : ScanCallback() {
-            override fun onScanResult(callbackType: Int, result: ScanResult) {
-                super.onScanResult(callbackType, result)
-                val deviceAddress = result.device.address
-                val deviceName = result.device.name
-                Log.d(TAG, "Found device: $deviceAddress, name: $deviceName, rssi: ${result.rssi}")
-                
-                val server = DiscoveredServer(
-                    deviceId = deviceAddress,
-                    deviceName = deviceName ?: "Unknown Device",
-                    rssi = result.rssi,
-                    bluetoothDevice = result.device
-                )
-                foundDevices[deviceAddress] = server
-                _discoveredServers.value = foundDevices.values.toList()
-                onResult(server)
-            }
-
-            override fun onBatchScanResults(results: MutableList<ScanResult>) {
-                super.onBatchScanResults(results)
-                Log.d(TAG, "Batch scan results: ${results.size} devices")
-                results.forEach { result ->
-                    val deviceAddress = result.device.address
-                    val server = DiscoveredServer(
-                        deviceId = deviceAddress,
-                        deviceName = result.device.name ?: "Unknown Device",
-                        rssi = result.rssi,
-                        bluetoothDevice = result.device
-                    )
-                    foundDevices[deviceAddress] = server
-                }
-                _discoveredServers.value = foundDevices.values.toList()
-            }
-
-            override fun onScanFailed(errorCode: Int) {
-                super.onScanFailed(errorCode)
-                val errorMsg = when (errorCode) {
-                    SCAN_FAILED_ALREADY_STARTED -> "Scan already started"
-                    SCAN_FAILED_APPLICATION_REGISTRATION_FAILED -> "App registration failed"
-                    SCAN_FAILED_INTERNAL_ERROR -> "Internal error"
-                    SCAN_FAILED_FEATURE_UNSUPPORTED -> "Feature unsupported"
-                    else -> "Unknown error"
-                }
-                Log.e(TAG, "Scan failed: $errorMsg (code: $errorCode)")
-                _scanError.value = "Scan failed: $errorMsg"
-                _isScanning.value = false
-            }
+    private fun callback(onResult: (DiscoveredServer) -> Unit) = object : ScanCallback() {
+        override fun onScanResult(callbackType: Int, result: ScanResult) {
+            publish(result, onResult)
         }
 
-        Log.d(TAG, "Starting BLE scan...")
-        try {
-            scanner?.startScan(listOf(scanFilter), scanSettings, scanCallback!!)
-            _isScanning.value = true
-            Log.d(TAG, "✓ Scan started successfully")
-            
-            // Schedule auto-stop based on scan timeout preference
-            val scanTimeoutMs = AppPreferences.getScanTimeoutMs(context)
-            scanTimeoutRunnable = Runnable {
-                Log.d(TAG, "Scan timeout reached (${scanTimeoutMs}ms), stopping scan")
-                stopScan()
-            }
-            scanTimeoutHandler.postDelayed(scanTimeoutRunnable!!, scanTimeoutMs)
-        } catch (e: Exception) {
-            Log.e(TAG, "Exception starting scan", e)
-            _scanError.value = "Exception: ${e.message}"
+        override fun onBatchScanResults(results: MutableList<ScanResult>) {
+            results.forEach { publish(it, onResult) }
         }
+
+        override fun onScanFailed(errorCode: Int) {
+            val message = when (errorCode) {
+                SCAN_FAILED_ALREADY_STARTED -> "Scan already started"
+                SCAN_FAILED_APPLICATION_REGISTRATION_FAILED -> "Bluetooth scanner registration failed"
+                SCAN_FAILED_INTERNAL_ERROR -> "Bluetooth controller scan error"
+                SCAN_FAILED_FEATURE_UNSUPPORTED -> "Filtered BLE scanning is unsupported"
+                else -> "BLE scan failed ($errorCode)"
+            }
+            fail(message)
+            stopScan()
+        }
+    }
+
+    private fun publish(result: ScanResult, onResult: (DiscoveredServer) -> Unit) {
+        val payload = result.scanRecord?.getServiceData(ParcelUuid(BleConstants.SERVICE_UUID)) ?: return
+        if (payload.size < 5 || payload[0] != BleConstants.PROTOCOL_VERSION) return
+        val token = payload.copyOfRange(1, 5).joinToString("") { "%02x".format(it) }
+        val previous = foundDevices[token]
+        val now = System.currentTimeMillis()
+        val last = lastPublishedAt[token] ?: 0L
+        if (previous != null && now - last < RESULT_THROTTLE_MS &&
+            kotlin.math.abs(previous.rssi - result.rssi) < MIN_RSSI_CHANGE_DB
+        ) return
+
+        val advertisedName = result.scanRecord?.deviceName
+            ?: runCatching { result.device.name }.getOrNull()
+        val server = DiscoveredServer(
+            deviceId = token,
+            deviceName = advertisedName ?: "EasierSpot ${token.takeLast(4).uppercase()}",
+            rssi = result.rssi,
+            bluetoothDevice = result.device
+        )
+        foundDevices[token] = server
+        lastPublishedAt[token] = now
+        _discoveredServers.value = foundDevices.values.sortedByDescending { it.rssi }
+        onResult(server)
     }
 
     fun stopScan() {
-        Log.d(TAG, "stopScan() called")
-        if (!isScanning.value && scanCallback == null) {
-            Log.d(TAG, "Not scanning, nothing to stop")
-            return
-        }
-
-        // Cancel any pending timeout
-        scanTimeoutRunnable?.let {
-            scanTimeoutHandler.removeCallbacks(it)
-            scanTimeoutRunnable = null
-        }
-
-        try {
-            scanCallback?.let {
-                scanner?.stopScan(it)
-                Log.d(TAG, "Scan stopped")
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error stopping scan", e)
-        }
+        handler.removeCallbacks(stopRunnable)
+        handler.removeCallbacks(balancedRunnable)
+        val callback = scanCallback
         scanCallback = null
+        if (callback != null) {
+            runCatching { scanner?.stopScan(callback) }
+                .onFailure { LogUtils.w(TAG, "Error stopping scan", it) }
+        }
+        scanner = null
         _isScanning.value = false
     }
 
-    private fun hasBluetoothPermissions(): Boolean {
-        val hasScan = ContextCompat.checkSelfPermission(
-            context,
-            Manifest.permission.BLUETOOTH_SCAN
-        ) == PackageManager.PERMISSION_GRANTED
-        
-        val hasLocation = ContextCompat.checkSelfPermission(
-            context,
-            Manifest.permission.ACCESS_FINE_LOCATION
-        ) == PackageManager.PERMISSION_GRANTED
-        
-        Log.d(TAG, "Permissions - BLUETOOTH_SCAN: $hasScan, ACCESS_FINE_LOCATION: $hasLocation")
-        return hasScan && hasLocation
+    private fun fail(message: String) {
+        _scanError.value = message
+        LogUtils.e(TAG, message)
     }
+
+    private fun hasBluetoothPermissions(): Boolean =
+        ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_SCAN) ==
+            PackageManager.PERMISSION_GRANTED &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT) ==
+            PackageManager.PERMISSION_GRANTED
 }
