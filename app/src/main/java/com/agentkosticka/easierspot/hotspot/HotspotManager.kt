@@ -42,6 +42,50 @@ data class WifiConnectResult(
     val detail: String
 )
 
+data class WifiVerificationResult(
+    val authoritative: Boolean,
+    val connectedToTarget: Boolean,
+    val connectedSsid: String?,
+    val hasInternetCapability: Boolean,
+    val validated: Boolean,
+    val detail: String
+)
+
+internal data class WifiStatusObservation(
+    val ssid: String,
+    val connected: Boolean,
+    val hasInternetCapability: Boolean,
+    val validated: Boolean
+)
+
+internal fun parseWifiStatus(output: String): List<WifiStatusObservation> =
+    output.split("WifiInfo:").drop(1).mapNotNull { section ->
+        val rawSsid = Regex("""SSID:\s*(\"(?:\\.|[^\"])*\"|[^,\r\n]+)""")
+            .find(section)
+            ?.groupValues
+            ?.getOrNull(1)
+            ?: return@mapNotNull null
+        val ssid = rawSsid.trim()
+            .removeSurrounding("\"")
+            .replace("\\\"", "\"")
+            .replace("\\\\", "\\")
+        val completed = section.contains("Supplicant state: COMPLETED", ignoreCase = true)
+        val ipAddress = Regex("""IP:\s*([^,\s]+)""", RegexOption.IGNORE_CASE)
+            .find(section)
+            ?.groupValues
+            ?.getOrNull(1)
+            ?.removePrefix("/")
+        val hasIpAddress = !ipAddress.isNullOrBlank() &&
+            ipAddress != "0.0.0.0" &&
+            !ipAddress.equals("null", ignoreCase = true)
+        WifiStatusObservation(
+            ssid = ssid,
+            connected = completed && hasIpAddress,
+            hasInternetCapability = Regex("""\bINTERNET\b""").containsMatchIn(section),
+            validated = Regex("""\bVALIDATED\b""").containsMatchIn(section)
+        )
+    }
+
 class HotspotManager(private val context: Context) {
     companion object {
         private const val TAG = "HotspotManager"
@@ -87,6 +131,103 @@ class HotspotManager(private val context: Context) {
             combined.contains("unknown command", ignoreCase = true)
         return WifiConnectResult(
             accepted = result.exitCode == 0 && !rejectedByWifiService,
+            detail = combined.ifBlank { "exit=${result.exitCode}" }
+        )
+    }
+
+    /**
+     * Ask Android's Wi-Fi selector to immediately reconsider visible networks. This keeps the
+     * WifiNetworkSuggestion owned by EasierSpot; unlike connect-network it does not create a
+     * shell-owned saved network. Android still makes the final selection.
+     */
+    fun requestSuggestionReevaluation(): WifiConnectResult = runWifiShellCommand(
+        arrayOf("/system/bin/cmd", "wifi", "start-scan")
+    )
+
+    /**
+     * Give an already-connected Wi-Fi network the maximum shell-exposed score. Some ROMs keep
+     * cellular as the default route after joining a suggestion; this nudges ConnectivityService
+     * toward making Wi-Fi the device-wide default without binding only this app to the network.
+     */
+    fun preferConnectedWifiAsDefault(): WifiConnectResult = runWifiShellCommand(
+        arrayOf("/system/bin/cmd", "wifi", "set-connected-score", "60")
+    )
+
+    /**
+     * Read WifiService's own connection state through the shell identity. This bypasses the
+     * WifiInfo redaction and stale ConnectivityManager callback behavior seen on some OEM ROMs.
+     */
+    fun verifyConnectedWifi(expectedSsid: String): WifiVerificationResult {
+        if (!isShizukuReady()) {
+            return WifiVerificationResult(
+                authoritative = false,
+                connectedToTarget = false,
+                connectedSsid = null,
+                hasInternetCapability = false,
+                validated = false,
+                detail = "Shizuku is unavailable"
+            )
+        }
+
+        val result = runShizukuCommand(arrayOf("/system/bin/cmd", "wifi", "status"))
+        if (result.exitCode != 0 || result.stdout.isBlank()) {
+            return WifiVerificationResult(
+                authoritative = false,
+                connectedToTarget = false,
+                connectedSsid = null,
+                hasInternetCapability = false,
+                validated = false,
+                detail = result.stderr.ifBlank { "wifi status exit=${result.exitCode}" }
+            )
+        }
+
+        val observations = parseWifiStatus(result.stdout)
+
+        if (observations.isEmpty()) {
+            return WifiVerificationResult(
+                authoritative = false,
+                connectedToTarget = false,
+                connectedSsid = null,
+                hasInternetCapability = false,
+                validated = false,
+                detail = "Wi-Fi status format was not recognized"
+            )
+        }
+
+        val target = observations.firstOrNull { observation ->
+            observation.connected && observation.ssid == expectedSsid
+        }
+        val connectedObservation = target ?: observations.firstOrNull { it.connected }
+        val connectedSsid = connectedObservation?.ssid
+        return WifiVerificationResult(
+            authoritative = true,
+            connectedToTarget = target != null,
+            connectedSsid = connectedSsid,
+            hasInternetCapability = target?.hasInternetCapability == true,
+            validated = target?.validated == true,
+            detail = if (target != null) {
+                "WifiService confirms $expectedSsid"
+            } else {
+                "WifiService reports ${connectedSsid ?: "no connected Wi-Fi"}"
+            }
+        )
+    }
+
+    private fun runWifiShellCommand(command: Array<String>): WifiConnectResult {
+        if (!isShizukuReady()) {
+            return WifiConnectResult(false, "Shizuku is unavailable")
+        }
+
+        val result = runShizukuCommand(command)
+        val combined = listOf(result.stdout, result.stderr)
+            .filter { it.isNotBlank() }
+            .joinToString("; ")
+        val rejected = combined.contains("failed", ignoreCase = true) ||
+            combined.contains("error", ignoreCase = true) ||
+            combined.contains("unknown command", ignoreCase = true) ||
+            combined.contains("not supported", ignoreCase = true)
+        return WifiConnectResult(
+            accepted = result.exitCode == 0 && !rejected,
             detail = combined.ifBlank { "exit=${result.exitCode}" }
         )
     }
