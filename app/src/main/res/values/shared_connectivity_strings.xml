@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="pref_system_wifi_picker_title">System Wi-Fi picker integration</string>
+    <string name="pref_system_wifi_picker_checking">Checking Android provider configuration…</string>
+    <string name="pref_system_wifi_picker_active">Active · tap for provider details</string>
+    <string name="pref_system_wifi_picker_unavailable">Unavailable on Android 12–13 · nearby notification is used instead</string>
+    <string name="pref_system_wifi_picker_blocked">Blocked by system provider configuration · using nearby notification instead\n%1$s</string>
+</resources>
