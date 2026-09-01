@@ -11,7 +11,15 @@ enum class ConnectTrigger {
 }
 
 object TrustedConnectLauncher {
+    private var activeToken: String? = null
+
+    @Synchronized
     fun connect(context: Context, token: String, trigger: ConnectTrigger) {
+        val state = BleClientService.connectionState.value
+        val attemptActive = state !is ClientConnectionState.Idle && state !is ClientConnectionState.Failed
+        if (attemptActive && activeToken == token) return
+
+        activeToken = token
         ConnectTriggerStore.record(context, trigger)
         BleClientService.connectTrusted(context.applicationContext, token)
     }
