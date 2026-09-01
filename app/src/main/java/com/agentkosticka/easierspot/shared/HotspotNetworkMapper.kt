@@ -1,6 +1,6 @@
 package com.agentkosticka.easierspot.shared
 
-import android.net.wifi.ScanResult
+import android.net.wifi.WifiInfo
 import android.net.wifi.sharedconnectivity.app.HotspotNetwork
 import android.net.wifi.sharedconnectivity.app.NetworkProviderInfo
 import android.os.Bundle
@@ -50,10 +50,10 @@ object HotspotNetworkMapper {
         runCatching { HotspotCredentials.SecurityType.valueOf(raw) }
             .getOrDefault(HotspotCredentials.SecurityType.WPA2_PSK)
     ) {
-        HotspotCredentials.SecurityType.OPEN -> listOf(ScanResult.SECURITY_TYPE_OPEN)
-        HotspotCredentials.SecurityType.WPA2_PSK -> listOf(ScanResult.SECURITY_TYPE_PSK)
-        HotspotCredentials.SecurityType.WPA3_SAE -> listOf(ScanResult.SECURITY_TYPE_SAE)
+        HotspotCredentials.SecurityType.OPEN -> listOf(WifiInfo.SECURITY_TYPE_OPEN)
+        HotspotCredentials.SecurityType.WPA2_PSK -> listOf(WifiInfo.SECURITY_TYPE_PSK)
+        HotspotCredentials.SecurityType.WPA3_SAE -> listOf(WifiInfo.SECURITY_TYPE_SAE)
         HotspotCredentials.SecurityType.WPA3_TRANSITION ->
-            listOf(ScanResult.SECURITY_TYPE_PSK, ScanResult.SECURITY_TYPE_SAE)
+            listOf(WifiInfo.SECURITY_TYPE_PSK, WifiInfo.SECURITY_TYPE_SAE)
     }
 }
