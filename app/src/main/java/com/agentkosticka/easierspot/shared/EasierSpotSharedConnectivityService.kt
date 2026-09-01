@@ -1,5 +1,7 @@
 package com.agentkosticka.easierspot.shared
 
+import android.app.PendingIntent
+import android.content.Context
 import android.content.Intent
 import android.net.wifi.sharedconnectivity.app.HotspotNetwork
 import android.net.wifi.sharedconnectivity.app.HotspotNetworkConnectionStatus
@@ -17,6 +19,7 @@ import com.agentkosticka.easierspot.service.BleClientService
 import com.agentkosticka.easierspot.service.ClientConnectionState
 import com.agentkosticka.easierspot.service.ConnectTrigger
 import com.agentkosticka.easierspot.service.TrustedConnectLauncher
+import com.agentkosticka.easierspot.ui.client.ClientActivity
 import com.agentkosticka.easierspot.util.LogUtils
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -41,12 +44,7 @@ class EasierSpotSharedConnectivityService : SharedConnectivityService(), SharedC
         scope.launch {
             val capability = SharedConnectivityActivation.reconcile(applicationContext)
             withContext(Dispatchers.Main) {
-                setSettingsState(
-                    SharedConnectivitySettingsState.Builder()
-                        .setInstantTetherEnabled(capability.isActive)
-                        .setExtras(Bundle.EMPTY)
-                        .build()
-                )
+                setSettingsState(buildSettingsState(capability.isActive))
             }
             requestRepublish()
         }
@@ -55,6 +53,54 @@ class EasierSpotSharedConnectivityService : SharedConnectivityService(), SharedC
                 onClientConnectionStateChanged(state)
             }
         }
+    }
+
+    /**
+     * Android 14 shipped a Context-taking Builder and an Intent settings setter. Newer releases
+     * use a no-arg Builder and a PendingIntent setter. Construct this tiny framework object by
+     * reflection so one APK remains binary-compatible with both shapes.
+     */
+    private fun buildSettingsState(enabled: Boolean): SharedConnectivitySettingsState {
+        val builderClass = Class.forName(
+            "android.net.wifi.sharedconnectivity.app.SharedConnectivitySettingsState\$Builder"
+        )
+        val builder = runCatching {
+            builderClass.getConstructor(Context::class.java).newInstance(this)
+        }.getOrElse {
+            builderClass.getConstructor().newInstance()
+        }
+
+        builderClass.getMethod(
+            "setInstantTetherEnabled",
+            Boolean::class.javaPrimitiveType
+        ).invoke(builder, enabled)
+        builderClass.getMethod("setExtras", Bundle::class.java).invoke(builder, Bundle.EMPTY)
+
+        if (enabled) {
+            val settingsIntent = Intent(this, ClientActivity::class.java)
+            val settingsMethod = builderClass.methods.firstOrNull {
+                it.name == "setInstantTetherSettingsPendingIntent" && it.parameterTypes.size == 1
+            }
+            settingsMethod?.let { method ->
+                runCatching {
+                    val argument: Any = when (method.parameterTypes[0]) {
+                        Intent::class.java -> settingsIntent
+                        PendingIntent::class.java -> PendingIntent.getActivity(
+                            this,
+                            0,
+                            settingsIntent,
+                            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                        )
+                        else -> return@runCatching
+                    }
+                    method.invoke(builder, argument)
+                }.onFailure {
+                    LogUtils.d(TAG, "Shared Connectivity settings shortcut unavailable: ${it.message}")
+                }
+            }
+        }
+
+        return builderClass.getMethod("build").invoke(builder) as SharedConnectivitySettingsState
     }
 
     override fun requestRepublish() {
