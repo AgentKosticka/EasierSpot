@@ -16,13 +16,14 @@ data class ConnectionEvidence(
     val privilegedSsidMatch: Boolean = false,
     val authenticatedAck: Boolean = false,
     val authenticatedGattFallback: Boolean = false,
+    // Diagnostic-only platform metadata. This must never gate EasierSpot connection success.
     val internetValidated: Boolean = false
 )
 
 sealed interface ConnectionVerdict {
     data object WaitingForWifi : ConnectionVerdict
     data class WaitingForPhone(val network: Network, val gateway: InetAddress) : ConnectionVerdict
-    data class Connected(val internet: InternetStatus) : ConnectionVerdict
+    data class Connected(val internet: InternetStatus = InternetStatus.NOT_CONFIRMED) : ConnectionVerdict
 }
 
 object ConnectionEvidenceReducer {
@@ -45,9 +46,9 @@ object ConnectionEvidenceReducer {
         if (!WifiIdentityEvidencePolicy.canAcceptCandidate(evidence)) {
             return ConnectionVerdict.WaitingForWifi
         }
-        return ConnectionVerdict.Connected(
-            if (evidence.internetValidated) InternetStatus.READY else InternetStatus.NOT_CONFIRMED
-        )
+        // EasierSpot's job ends when Android joined the intended Wi-Fi and the paired phone was
+        // authenticated. Captive portal / internet / VALIDATED state belongs to Android.
+        return ConnectionVerdict.Connected()
     }
 }
 
