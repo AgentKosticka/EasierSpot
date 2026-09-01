@@ -93,6 +93,17 @@
             android:name=".service.BleClientService"
             android:foregroundServiceType="connectedDevice"
             android:exported="false" />
+        <service
+            android:name=".shared.EasierSpotSharedConnectivityService"
+            android:enabled="@bool/shared_connectivity_provider_enabled"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.agentkosticka.easierspot.SHARED_CONNECTIVITY" />
+            </intent-filter>
+        </service>
+        <receiver
+            android:name=".service.NearbyConnectReceiver"
+            android:exported="false" />
         <receiver
             android:name=".service.ClientServiceBootReceiver"
             android:enabled="true"

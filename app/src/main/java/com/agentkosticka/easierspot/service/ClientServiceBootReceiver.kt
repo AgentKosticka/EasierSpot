@@ -24,9 +24,11 @@ import com.agentkosticka.easierspot.R
 import com.agentkosticka.easierspot.ble.BleConstants
 import com.agentkosticka.easierspot.ble.BleDiscoveryProtocol
 import com.agentkosticka.easierspot.ble.client.BleDiscoveryRegistrar
+import com.agentkosticka.easierspot.ble.client.PRESENCE_WINDOW_MS
 import com.agentkosticka.easierspot.ble.client.TrustedServerProfile
 import com.agentkosticka.easierspot.ble.client.TrustedServerStore
 import com.agentkosticka.easierspot.ble.client.RecentBleAddressCache
+import com.agentkosticka.easierspot.shared.SharedConnectivityBackends
 import com.agentkosticka.easierspot.ui.settings.AppPreferences
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -74,8 +76,10 @@ class ClientServiceBootReceiver : BroadcastReceiver() {
                         beacon.token,
                         beacon.networkRevision,
                         beacon.advertisingSession,
-                        System.currentTimeMillis()
+                        System.currentTimeMillis(),
+                        flags = beacon.flags
                     ) ?: return@forEach
+                    SharedConnectivityBackends.current.onPresenceChanged(context)
                     if (observed.second) showNearbyNotification(context, observed.first, beacon.flags)
                 }
             } finally {
@@ -91,6 +95,7 @@ class ClientServiceBootReceiver : BroadcastReceiver() {
                 if (!BleDiscoveryRegistrar.reconcile(context) && shouldRetryDiscovery(context)) {
                     scheduleDiscoveryRetry(context)
                 }
+                SharedConnectivityBackends.current.reconcile(context)
             } finally {
                 pendingResult.finish()
             }
@@ -160,29 +165,30 @@ class ClientServiceBootReceiver : BroadcastReceiver() {
             }
         )
         val notificationId = profile.fingerprint.hashCode()
-        val connectIntent = PendingIntent.getForegroundService(
+        val connectIntent = PendingIntent.getBroadcast(
             context,
             notificationId,
-            Intent(context, BleClientService::class.java).apply {
-                action = BleClientService.ACTION_CONNECT
-                putExtra(BleClientService.EXTRA_TOKEN, profile.discoveryToken)
-                putExtra(BleClientService.EXTRA_ALERT_NOTIFICATION_ID, notificationId)
+            Intent(context, NearbyConnectReceiver::class.java).apply {
+                putExtra(NearbyConnectReceiver.EXTRA_TOKEN, profile.discoveryToken)
+                putExtra(NearbyConnectReceiver.EXTRA_NOTIFICATION_ID, notificationId)
             },
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         val ready = flags and BleConstants.FLAG_HOTSPOT_ACTIVE != 0
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_launcher_notification)
-            .setContentTitle("New shared network: ${profile.label}")
-            .setContentText(if (ready) {
-                "The hotspot is ready. Tap Connect to join now."
-            } else {
-                "Tap Connect to wake the phone's hotspot and join it."
-            })
+            .setContentTitle(profile.label)
+            .setContentText(if (ready) "EasierSpot hotspot ready" else "Available via EasierSpot")
+            .setStyle(
+                NotificationCompat.BigTextStyle().bigText(
+                    if (ready) "EasierSpot hotspot ready. Tap Connect to join automatically."
+                    else "Available via EasierSpot. Tap Connect to turn on the remote hotspot and join automatically."
+                )
+            )
             .setContentIntent(connectIntent)
             .addAction(0, "Connect", connectIntent)
             .setAutoCancel(true)
-            .setTimeoutAfter(5 * 60_000L)
+            .setTimeoutAfter(PRESENCE_WINDOW_MS + 5_000L)
             .setCategory(NotificationCompat.CATEGORY_RECOMMENDATION)
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .setOnlyAlertOnce(true)
@@ -199,7 +205,7 @@ class ClientServiceBootReceiver : BroadcastReceiver() {
     }
 
     companion object {
-        private const val CHANNEL_ID = "nearby_wifi_alerts_v4_quiet"
+        private const val CHANNEL_ID = "nearby_wifi_alerts_v5_network_style"
         private const val LOUD_CHANNEL_ID = "nearby_wifi_alerts_v3_loud"
         private const val LEGACY_CHANNEL_ID = "nearby_wifi_alerts_v2"
         private const val ACTION_RECONCILE_DISCOVERY =

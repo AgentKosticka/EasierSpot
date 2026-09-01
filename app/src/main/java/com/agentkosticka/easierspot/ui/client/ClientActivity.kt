@@ -23,9 +23,12 @@ import com.agentkosticka.easierspot.ble.client.BleDiscoveryRegistrar
 import com.agentkosticka.easierspot.ble.client.DiscoveredServer
 import com.agentkosticka.easierspot.ble.client.TrustedServerProfile
 import com.agentkosticka.easierspot.ble.client.TrustedServerStore
+import com.agentkosticka.easierspot.ble.client.isRecentlyPresent
 import com.agentkosticka.easierspot.hotspot.WifiSuggestionInstaller
 import com.agentkosticka.easierspot.service.BleClientService
 import com.agentkosticka.easierspot.service.ClientConnectionState
+import com.agentkosticka.easierspot.service.ConnectTrigger
+import com.agentkosticka.easierspot.service.TrustedConnectLauncher
 import com.agentkosticka.easierspot.service.titleAndText
 import com.agentkosticka.easierspot.ui.permissions.PermissionsActivity
 import com.agentkosticka.easierspot.ui.settings.SettingsActivity
@@ -42,7 +45,8 @@ class ClientActivity : AppCompatActivity() {
     private val rows = mutableListOf<Map<String, String>>()
     private data class RowTarget(
         val trusted: TrustedServerProfile?,
-        val discovered: DiscoveredServer?
+        val discovered: DiscoveredServer?,
+        val header: Boolean = false
     )
     private val targets = mutableListOf<RowTarget>()
     private var latestServers: List<DiscoveredServer> = emptyList()
@@ -73,14 +77,21 @@ class ClientActivity : AppCompatActivity() {
             adapter = this@ClientActivity.adapter
             setOnItemClickListener { _, _, position, _ ->
                 val target = targets.getOrNull(position) ?: return@setOnItemClickListener
+                if (target.header) return@setOnItemClickListener
                 if (target.trusted != null) {
-                    BleClientService.connectTrusted(applicationContext, target.trusted.discoveryToken)
+                    TrustedConnectLauncher.connect(
+                        applicationContext,
+                        target.trusted.discoveryToken,
+                        ConnectTrigger.CLIENT_ACTIVITY
+                    )
                 } else {
                     target.discovered?.let { BleClientService.pair(applicationContext, it) }
                 }
             }
             setOnItemLongClickListener { _, _, position, _ ->
-                targets.getOrNull(position)?.trusted?.let(::showPairedDeviceMenu) != null
+                val target = targets.getOrNull(position) ?: return@setOnItemLongClickListener false
+                if (target.header) return@setOnItemLongClickListener false
+                target.trusted?.let(::showPairedDeviceMenu) != null
             }
         }
         scanButton.setOnClickListener {
@@ -136,26 +147,47 @@ class ClientActivity : AppCompatActivity() {
             val trusted = withContext(Dispatchers.IO) {
                 TrustedServerStore(applicationContext).all()
             }
+            val now = System.currentTimeMillis()
             val byToken = discovered.associateBy { it.deviceId }
+            val available = trusted.filter { profile ->
+                byToken.containsKey(profile.discoveryToken) || profile.isRecentlyPresent(now)
+            }
+            val absent = trusted.filterNot(available::contains)
+            val fresh = discovered.filter { server -> trusted.none { it.discoveryToken == server.deviceId } }
+
             targets.clear()
             rows.clear()
-            trusted.forEach { profile ->
-                val nearby = byToken[profile.discoveryToken]
-                targets += RowTarget(profile, nearby)
-                rows += mapOf(
-                    "name" to profile.label,
-                    "detail" to if (nearby != null) getString(R.string.paired_tap_connect)
-                    else getString(R.string.paired_not_nearby)
-                )
+            fun header(label: String) {
+                targets += RowTarget(null, null, header = true)
+                rows += mapOf("name" to label, "detail" to "")
             }
-            discovered.filter { server -> trusted.none { it.discoveryToken == server.deviceId } }
-                .forEach { server ->
+            if (available.isNotEmpty()) {
+                header("Available via EasierSpot")
+                available.forEach { profile ->
+                    targets += RowTarget(profile, byToken[profile.discoveryToken])
+                    rows += mapOf(
+                        "name" to profile.label,
+                        "detail" to "Available via EasierSpot"
+                    )
+                }
+            }
+            if (absent.isNotEmpty()) {
+                header("Paired devices")
+                absent.forEach { profile ->
+                    targets += RowTarget(profile, null)
+                    rows += mapOf("name" to profile.label, "detail" to "Not nearby")
+                }
+            }
+            if (fresh.isNotEmpty()) {
+                header("New EasierSpot devices")
+                fresh.forEach { server ->
                     targets += RowTarget(null, server)
                     rows += mapOf(
                         "name" to (server.deviceName ?: getString(R.string.nearby_easierspot_phone)),
                         "detail" to getString(R.string.new_phone_tap_pair)
                     )
                 }
+            }
             adapter?.notifyDataSetChanged()
         }
     }

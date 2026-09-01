@@ -26,5 +26,6 @@ data class TrustedServerEntity(
     val controlCounter: Long = 0L,
     val lastAlertAt: Long = 0L,
     val lastAlertRevision: Int = -1,
-    val lastPresenceAt: Long = 0L
+    val lastPresenceAt: Long = 0L,
+    val lastPresenceFlags: Int = 0
 )
