@@ -1,112 +1,161 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="vertical"
+    android:fillViewport="true"
     android:fitsSystemWindows="true">
 
     <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1"
+        android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:paddingTop="16dp"
-        android:paddingBottom="16dp"
         android:paddingStart="@dimen/padding_horizontal_safe"
-        android:paddingEnd="@dimen/padding_horizontal_safe">
+        android:paddingTop="20dp"
+        android:paddingEnd="@dimen/padding_horizontal_safe"
+        android:paddingBottom="24dp">
 
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:gravity="end"
-            android:layout_marginBottom="8dp">
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="@string/easier_spot"
+                android:textSize="30sp"
+                android:textStyle="bold" />
 
             <ImageButton
                 android:id="@+id/btn_settings"
-                android:layout_width="40dp"
-                android:layout_height="40dp"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
                 android:background="?attr/selectableItemBackgroundBorderless"
                 android:contentDescription="@string/action_settings"
                 android:src="@drawable/ic_settings" />
         </LinearLayout>
 
-        <LinearLayout
+        <TextView
             android:layout_width="match_parent"
-            android:layout_height="0dp"
-            android:layout_weight="1"
-            android:gravity="center"
-            android:orientation="vertical">
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/dashboard_intro"
+            android:textSize="16sp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="28dp"
+            android:text="@string/dashboard_share_title"
+            android:textSize="20sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/tv_server_status"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:text="@string/dashboard_share_off"
+            android:textSize="15sp" />
+
+        <Button
+            android:id="@+id/btn_server_mode"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:minHeight="48dp"
+            android:text="@string/dashboard_enable_sharing" />
+
+        <Button
+            android:id="@+id/btn_manage_sharing"
+            style="?android:attr/borderlessButtonStyle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="48dp"
+            android:text="@string/dashboard_manage_sharing" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="28dp"
+            android:text="@string/dashboard_nearby_title"
+            android:textSize="20sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/tv_client_status"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:text="@string/dashboard_client_ready"
+            android:textSize="15sp" />
+
+        <Button
+            android:id="@+id/btn_client_mode"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:minHeight="48dp"
+            android:text="@string/dashboard_find_phones" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="28dp"
+            android:text="@string/dashboard_health_title"
+            android:textSize="20sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/tv_setup_health"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:lineSpacingExtra="4dp"
+            android:text="@string/dashboard_health_checking"
+            android:textSize="15sp" />
+
+        <Button
+            android:id="@+id/btn_copy_report"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:minHeight="48dp"
+            android:text="@string/dashboard_copy_report" />
+
+        <LinearLayout
+            android:id="@+id/update_warning_banner"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="24dp"
+            android:background="@drawable/bg_update_warning_banner"
+            android:clickable="true"
+            android:focusable="true"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:padding="16dp"
+            android:visibility="gone">
 
             <TextView
-                android:layout_width="match_parent"
+                android:id="@+id/tv_update_warning_icon"
+                android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginBottom="32dp"
-                android:gravity="center"
-                android:text="@string/easier_spot"
-                android:textSize="32sp"
+                android:layout_marginEnd="10dp"
+                android:text="@string/update_available_icon"
+                android:textColor="@color/update_banner_icon"
+                android:textSize="18sp"
                 android:textStyle="bold" />
 
             <TextView
-                android:layout_width="match_parent"
+                android:id="@+id/tv_update_warning_text"
+                android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:text="@string/select_mode"
-                android:textSize="18sp"
-                android:gravity="center"
-                android:layout_marginBottom="24dp" />
-
-            <Button
-                android:id="@+id/btn_client_mode"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="@string/connect_to_hotspot_client"
-                android:layout_marginBottom="16dp"
-                android:padding="16dp" />
-
-            <Button
-                android:id="@+id/btn_server_mode"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="@string/share_hotspot_server"
-                android:padding="16dp" />
+                android:layout_weight="1"
+                android:text="@string/update_available_default"
+                android:textColor="@color/update_banner_text"
+                android:textSize="14sp" />
         </LinearLayout>
     </LinearLayout>
-
-    <LinearLayout
-        android:id="@+id/update_warning_banner"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginStart="@dimen/padding_horizontal_safe"
-        android:layout_marginEnd="@dimen/padding_horizontal_safe"
-        android:layout_marginBottom="16dp"
-        android:orientation="horizontal"
-        android:gravity="center_vertical"
-        android:paddingStart="16dp"
-        android:paddingEnd="16dp"
-        android:paddingTop="12dp"
-        android:paddingBottom="12dp"
-        android:background="@drawable/bg_update_warning_banner"
-        android:clickable="true"
-        android:focusable="true"
-        android:visibility="gone">
-
-        <TextView
-            android:id="@+id/tv_update_warning_icon"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="@string/update_available_icon"
-            android:textStyle="bold"
-            android:textSize="18sp"
-            android:textColor="@color/update_banner_icon"
-            android:layout_marginEnd="10dp" />
-
-        <TextView
-            android:id="@+id/tv_update_warning_text"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="@string/update_available_default"
-            android:textColor="@color/update_banner_text"
-            android:textSize="14sp" />
-    </LinearLayout>
-
-</LinearLayout>
+</ScrollView>

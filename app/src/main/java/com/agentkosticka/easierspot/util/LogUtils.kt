@@ -40,7 +40,7 @@ object LogUtils {
     @Suppress("unused")
     fun v(tag: String, message: String) {
         if (LOG_LEVEL <= Level.VERBOSE) {
-            Log.v(tag, message)
+            Log.v(tag, sanitize(message))
         }
     }
 
@@ -48,42 +48,42 @@ object LogUtils {
     fun d(tag: String, message: String) {
         val debugEnabled = appContext?.let { AppPreferences.isDebugLoggingEnabled(it) } ?: true
         if (debugEnabled && LOG_LEVEL <= Level.DEBUG) {
-            Log.d(tag, message)
+            Log.d(tag, sanitize(message))
         }
     }
 
     @Suppress("unused")
     fun i(tag: String, message: String) {
         if (LOG_LEVEL <= Level.INFO) {
-            Log.i(tag, message)
+            Log.i(tag, sanitize(message))
         }
     }
 
     @Suppress("unused")
     fun w(tag: String, message: String) {
         if (LOG_LEVEL <= Level.WARN) {
-            Log.w(tag, message)
+            Log.w(tag, sanitize(message))
         }
     }
 
     @Suppress("unused")
     fun w(tag: String, message: String, throwable: Throwable) {
         if (LOG_LEVEL <= Level.WARN) {
-            Log.w(tag, message, throwable)
+            Log.w(tag, sanitize(message), throwable)
         }
     }
 
     @Suppress("unused")
     fun e(tag: String, message: String) {
         if (LOG_LEVEL <= Level.ERROR) {
-            Log.e(tag, message)
+            Log.e(tag, sanitize(message))
         }
     }
 
     @Suppress("unused")
     fun e(tag: String, message: String, throwable: Throwable) {
         if (LOG_LEVEL <= Level.ERROR) {
-            Log.e(tag, message, throwable)
+            Log.e(tag, sanitize(message), throwable)
         }
     }
 
@@ -93,7 +93,12 @@ object LogUtils {
      */
     fun diag(tag: String, message: String) {
         if (DIAGNOSTIC_MODE) {
-            Log.d(tag, "[DIAG] $message")
+            Log.d(tag, "[DIAG] ${sanitize(message)}")
         }
     }
+
+    private fun sanitize(value: String): String = value
+        .replace(Regex("(?i)(password|passphrase|psk)\\s*[=:]\\s*\\S+"), "$1=<redacted>")
+        .replace(Regex("(?i)\\b(?:[0-9a-f]{2}:){5}[0-9a-f]{2}\\b"), "<device>")
+        .replace(Regex("(?i)\\b[0-9a-f]{24,}\\b"), "<identity>")
 }

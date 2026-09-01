@@ -11,33 +11,29 @@ object AppPreferences {
     private const val KEY_THEME_MODE = "theme_mode"
     private const val KEY_UPDATE_CHECK_ENABLED = "update_check_enabled"
     private const val KEY_APP_LANGUAGE = "app_language"
-    private const val KEY_APPROVAL_NOTIFICATION_ENABLED = "approval_notification_enabled"
-    private const val KEY_CONNECTION_NOTIFICATION_ENABLED = "connection_notification_enabled"
     private const val KEY_NOTIFICATION_SOUND_ENABLED = "notification_sound_enabled"
     private const val KEY_NOTIFICATION_VIBRATION_ENABLED = "notification_vibration_enabled"
     private const val KEY_BLE_ADVERTISING_INTERVAL = "ble_advertising_interval"
     private const val KEY_BROADCAST_STRENGTH = "broadcast_strength"
     private const val KEY_SCAN_TIMEOUT_MS = "scan_timeout_ms"
-    private const val KEY_AUTO_RETRY_ENABLED = "auto_retry_enabled"
+    private const val KEY_BACKGROUND_DISCOVERY_ENABLED = "background_discovery_enabled"
+    private const val KEY_WIFI_CONNECTION_MODE = "wifi_connection_mode"
     private const val KEY_DEFAULT_APPROVAL_POLICY = "default_approval_policy"
     private const val KEY_DEBUG_LOGGING_ENABLED = "debug_logging_enabled"
-    private const val KEY_KEEP_SCREEN_ON = "keep_screen_on"
     private const val KEY_MIGRATED_FROM_DEFAULT_PREFS = "migrated_from_default_prefs"
 
     // Default values
     private const val DEFAULT_UPDATE_CHECK_ENABLED = true
     private const val DEFAULT_APP_LANGUAGE = "system"
-    private const val DEFAULT_APPROVAL_NOTIFICATION_ENABLED = true
-    private const val DEFAULT_CONNECTION_NOTIFICATION_ENABLED = true
     private const val DEFAULT_NOTIFICATION_SOUND_ENABLED = true
     private const val DEFAULT_NOTIFICATION_VIBRATION_ENABLED = true
     private const val DEFAULT_ADVERTISING_INTERVAL = "slow"
     private const val DEFAULT_BROADCAST_STRENGTH = "low"
     private const val DEFAULT_SCAN_TIMEOUT_MS = 30000L
-    private const val DEFAULT_AUTO_RETRY_ENABLED = true
+    private const val DEFAULT_BACKGROUND_DISCOVERY_ENABLED = true
+    private const val DEFAULT_WIFI_CONNECTION_MODE = "auto"
     private const val DEFAULT_APPROVAL_POLICY = "ask"
     private const val DEFAULT_DEBUG_LOGGING_ENABLED = false
-    private const val DEFAULT_KEEP_SCREEN_ON = false
 
     enum class AdvertisingInterval(val value: String) {
         SLOW("slow"),
@@ -75,6 +71,17 @@ object AppPreferences {
         }
     }
 
+    enum class WifiConnectionMode(val value: String) {
+        AUTO("auto"),
+        SUGGESTION("suggestion"),
+        SHIZUKU_FORCE("shizuku_force");
+
+        companion object {
+            fun fromValue(value: String?): WifiConnectionMode =
+                entries.firstOrNull { it.value == value } ?: AUTO
+        }
+    }
+
     private fun getPrefs(context: Context) =
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
@@ -82,17 +89,15 @@ object AppPreferences {
         KEY_THEME_MODE,
         KEY_UPDATE_CHECK_ENABLED,
         KEY_APP_LANGUAGE,
-        KEY_APPROVAL_NOTIFICATION_ENABLED,
-        KEY_CONNECTION_NOTIFICATION_ENABLED,
         KEY_NOTIFICATION_SOUND_ENABLED,
         KEY_NOTIFICATION_VIBRATION_ENABLED,
         KEY_BLE_ADVERTISING_INTERVAL,
         KEY_BROADCAST_STRENGTH,
         KEY_SCAN_TIMEOUT_MS,
-        KEY_AUTO_RETRY_ENABLED,
+        KEY_BACKGROUND_DISCOVERY_ENABLED,
+        KEY_WIFI_CONNECTION_MODE,
         KEY_DEFAULT_APPROVAL_POLICY,
-        KEY_DEBUG_LOGGING_ENABLED,
-        KEY_KEEP_SCREEN_ON
+        KEY_DEBUG_LOGGING_ENABLED
     )
 
     // Update Check
@@ -145,9 +150,22 @@ object AppPreferences {
         return getLongPreference(context, KEY_SCAN_TIMEOUT_MS, DEFAULT_SCAN_TIMEOUT_MS)
     }
 
-    // Auto Retry
-    fun isAutoRetryEnabled(context: Context): Boolean {
-        return getPrefs(context).getBoolean(KEY_AUTO_RETRY_ENABLED, DEFAULT_AUTO_RETRY_ENABLED)
+    fun isBackgroundDiscoveryEnabled(context: Context): Boolean =
+        getPrefs(context).getBoolean(
+            KEY_BACKGROUND_DISCOVERY_ENABLED,
+            DEFAULT_BACKGROUND_DISCOVERY_ENABLED
+        )
+
+    fun setBackgroundDiscoveryEnabled(context: Context, enabled: Boolean) {
+        getPrefs(context).edit { putBoolean(KEY_BACKGROUND_DISCOVERY_ENABLED, enabled) }
+    }
+
+    fun getWifiConnectionMode(context: Context): WifiConnectionMode = WifiConnectionMode.fromValue(
+        getPrefs(context).getString(KEY_WIFI_CONNECTION_MODE, DEFAULT_WIFI_CONNECTION_MODE)
+    )
+
+    fun setWifiConnectionMode(context: Context, mode: WifiConnectionMode) {
+        getPrefs(context).edit { putString(KEY_WIFI_CONNECTION_MODE, mode.value) }
     }
 
     // Default Approval Policy
@@ -163,11 +181,6 @@ object AppPreferences {
     // Debug Logging
     fun isDebugLoggingEnabled(context: Context): Boolean {
         return getPrefs(context).getBoolean(KEY_DEBUG_LOGGING_ENABLED, DEFAULT_DEBUG_LOGGING_ENABLED)
-    }
-
-    // Keep Screen On
-    fun isKeepScreenOnEnabled(context: Context): Boolean {
-        return getPrefs(context).getBoolean(KEY_KEEP_SCREEN_ON, DEFAULT_KEEP_SCREEN_ON)
     }
 
     // Reset all preferences to defaults

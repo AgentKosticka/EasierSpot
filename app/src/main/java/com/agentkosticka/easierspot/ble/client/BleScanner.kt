@@ -16,6 +16,7 @@ import android.os.Looper
 import android.os.ParcelUuid
 import androidx.core.content.ContextCompat
 import com.agentkosticka.easierspot.ble.BleConstants
+import com.agentkosticka.easierspot.ble.BleDiscoveryProtocol
 import com.agentkosticka.easierspot.ui.settings.AppPreferences
 import com.agentkosticka.easierspot.util.LogUtils
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -26,7 +27,9 @@ data class DiscoveredServer(
     val deviceId: String,
     val deviceName: String?,
     val rssi: Int,
-    val bluetoothDevice: BluetoothDevice
+    val bluetoothDevice: BluetoothDevice,
+    val networkRevision: Int = 0,
+    val flags: Int = 0
 )
 
 /** Foreground, bounded scanner with a short fast phase and throttled result updates. */
@@ -155,8 +158,8 @@ class BleScanner(private val context: Context) {
 
     private fun publish(result: ScanResult, onResult: (DiscoveredServer) -> Unit) {
         val payload = result.scanRecord?.getServiceData(ParcelUuid(BleConstants.SERVICE_UUID)) ?: return
-        if (payload.size < 5 || payload[0] != BleConstants.PROTOCOL_VERSION) return
-        val token = payload.copyOfRange(1, 5).joinToString("") { "%02x".format(it) }
+        val beacon = BleDiscoveryProtocol.parseServer(payload) ?: return
+        val token = beacon.token
         val previous = foundDevices[token]
         val now = System.currentTimeMillis()
         val last = lastPublishedAt[token] ?: 0L
@@ -170,7 +173,9 @@ class BleScanner(private val context: Context) {
             deviceId = token,
             deviceName = advertisedName ?: "EasierSpot ${token.takeLast(4).uppercase()}",
             rssi = result.rssi,
-            bluetoothDevice = result.device
+            bluetoothDevice = result.device,
+            networkRevision = beacon.networkRevision,
+            flags = beacon.flags
         )
         foundDevices[token] = server
         lastPublishedAt[token] = now

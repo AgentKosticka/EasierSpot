@@ -7,6 +7,8 @@ import android.os.Build
 import androidx.core.content.ContextCompat
 
 object AppPermissions {
+    enum class Role { CLIENT, SERVER, ALL }
+
     val requiredRuntimePermissions: List<String>
         get() = buildList {
             add(Manifest.permission.BLUETOOTH_SCAN)
@@ -39,6 +41,18 @@ object AppPermissions {
     fun hasRequiredRuntimePermissions(context: Context): Boolean {
         return requiredRuntimePermissions.all { isGranted(context, it) }
     }
+
+    fun requiredFor(role: Role): List<String> = when (role) {
+        Role.CLIENT, Role.ALL -> requiredRuntimePermissions
+        Role.SERVER -> listOf(
+            Manifest.permission.BLUETOOTH_SCAN,
+            Manifest.permission.BLUETOOTH_CONNECT,
+            Manifest.permission.BLUETOOTH_ADVERTISE
+        )
+    }
+
+    fun hasRequiredRuntimePermissions(context: Context, role: Role): Boolean =
+        requiredFor(role).all { isGranted(context, it) }
 
     fun missingRuntimePermissions(context: Context): List<String> {
         return allRuntimePermissions.filterNot { isGranted(context, it) }

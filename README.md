@@ -18,29 +18,37 @@ Allows you to share your hotspot with your other devices and/or other people. Th
 - Runtime requirements:
   - Bluetooth → For communicating between the server and client
   - Location → **WE DO NOT USE YOUR GPS**, the android system classifies scanning for BLE devices as being able to track the users location in 3D space. We, however, use it exclusively for finding a suitable server to connect to
-  - Notifications → We use them to inform you when a client needs to be approved and when you are running the server
+  - Notifications → Used for approvals, foreground-service status, and Connect actions when a previously paired server is nearby
   - Network state access → To automatically connect you to the Wi-Fi 
   - Shizuku → **only required if you plan to run the server** because without it, we cannot turn your hotspot on without prompting you to do it yourself.
 
 ### How It Works
 
-Easier Spot operates in two modes:
+Easier Spot uses one dashboard with sharing and nearby-device controls:
 
 **Server Mode** (Hotspot Owner) (Requires Shizuku to work)
 - Reads your device's active Wi-Fi hotspot credentials using privileged system APIs
-- Advertises availability via BLE broadcasting
-- Shares credentials with approved client devices over a secure BLE GATT connection
+- Publishes a slow, low-power BLE availability beacon while listening for authenticated wake requests from paired clients
+- Starts the hotspot immediately after an authenticated tap-to-connect wake request
+- Uses secure BLE GATT only for first pairing, changed credentials, and fallback
+- Confirms connected clients over an authenticated, network-bound UDP control channel
 - Manages device approval with configurable policies (auto-approve, always-ask, or auto-deny) and ability to nickname devices to quickly distinguish them from each other
 
 **Client Mode** (Connecting Device)
-- Scans for nearby Easier Spot servers via BLE
+- Uses Android's OS-owned filtered PendingIntent BLE scan while idle; no idle client service or polling loop runs
 - Connects to discovered servers and requests hotspot credentials
-- Receives and displays the hotspot SSID and password and saves them with your system
-- Automatically attempts to connect to said Wi-Fi. Sometimes fails and needs to be connected manually in your network settings
+- Remembers an authenticated server only after the first approved pairing
+- Offers one expiring Connect notification when a paired sharing phone becomes nearby
+- Sends the authenticated wake only after Connect is tapped, starting hotspot activation before GATT
+- Keeps every provisioned network as an Android-owned suggestion and adaptively races it with Shizuku acceleration
+- Declares success only after the expected Wi-Fi has an address and the paired phone returns an authenticated ACK
+- Sends one small authenticated UDP heartbeat per minute while connected
 
 ### Key Features
 
-- **BLE-Based Discovery**: Low-power Bluetooth scanning and advertising to work for prolonged periods of time without draining the battery
+- **Low-power discovery**: OS-owned filtered scanning on the client and ultra-low-power advertising plus route-filtered wake scanning on the server
+- **Automatic Cleanup**: After three missed heartbeat windows, the server stops only hotspots that Easier Spot itself started. User-started hotspots are never auto-stopped
+- **Out-of-range Signal**: A disconnected client emits a short authenticated high-power BLE burst so the server can react even after Wi-Fi is gone
 - **Ease of use**: App features a simplistic UI that gets the job done
 - **Manual Control**: Server owners approve or deny connection requests from client devices
 
@@ -96,18 +104,20 @@ Easier Spot operates in two modes:
 
 ### Server Setup (Hotspot Owner)
 
-1. Open Easier Spot and tap "Server Mode"
-2. The app will start advertising via BLE
+1. Open Easier Spot and enable "Share from this phone"
+2. The app will start low-power advertising via BLE
 3. When a client connects, approve or deny the connection request
 4. Manage remembered devices and approval policies in settings
 
 ### Client Setup (Connecting Device)
 
-1. Open Easier Spot and tap "Client Mode"
-2. The app will scan for nearby Easier Spot servers
+1. Open Easier Spot and open the nearby-device list
+2. The app starts a bounded foreground scan automatically
 3. Tap on a discovered server to connect
-4. Once approved, the hotspot credentials will save in your system
-5. The app should automatically connect to said Wi-Fi, if it doesn't, you will still have the Wi-Fi saved in your android settings
+4. Once approved, Easier Spot installs an app-owned Wi-Fi suggestion; Auto mode also uses Shizuku when it can make the switch faster
+5. Future sightings appear as a background Connect notification. Tap once to wake the phone, start its hotspot, and join
+
+Both phones must run protocol-v3 builds. Older protocol versions are intentionally not discovered or accepted.
 
 ### Project Structure
 

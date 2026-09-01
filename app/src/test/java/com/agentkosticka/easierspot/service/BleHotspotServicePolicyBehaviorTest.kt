@@ -3,10 +3,18 @@ package com.agentkosticka.easierspot.service
 import com.agentkosticka.easierspot.data.model.RememberedServer
 import com.agentkosticka.easierspot.ui.settings.AppPreferences
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class BleHotspotServicePolicyBehaviorTest {
+    @Test
+    fun autoStop_neverStopsUserOwnedHotspot() {
+        assertFalse(BleHotspotService.shouldAutoStopHotspot(startedByApp = false, activeClientCount = 0))
+        assertFalse(BleHotspotService.shouldAutoStopHotspot(startedByApp = false, activeClientCount = 1))
+        assertFalse(BleHotspotService.shouldAutoStopHotspot(startedByApp = true, activeClientCount = 1))
+        assertTrue(BleHotspotService.shouldAutoStopHotspot(startedByApp = true, activeClientCount = 0))
+    }
 
     private val service = BleHotspotService()
 

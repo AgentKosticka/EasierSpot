@@ -17,6 +17,7 @@ class PermissionsActivity : AppCompatActivity() {
     companion object {
         private const val TAG = "PermissionsActivity"
         const val EXTRA_VIEW_ONLY = "extra_view_only"
+        const val EXTRA_ROLE = "extra_role"
     }
 
     private data class PermissionGroupUi(
@@ -37,11 +38,16 @@ class PermissionsActivity : AppCompatActivity() {
     private lateinit var permissionUiItems: List<PermissionGroupUi>
     private lateinit var continueButton: Button
     private lateinit var shizukuButton: Button
+    private val role: AppPermissions.Role by lazy {
+        runCatching {
+            AppPermissions.Role.valueOf(intent.getStringExtra(EXTRA_ROLE) ?: AppPermissions.Role.ALL.name)
+        }.getOrDefault(AppPermissions.Role.ALL)
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val viewOnly = intent.getBooleanExtra(EXTRA_VIEW_ONLY, false)
-        if (!viewOnly && AppPermissions.missingRuntimePermissions(this).isEmpty()) {
+        if (!viewOnly && AppPermissions.hasRequiredRuntimePermissions(this, role)) {
             openMainAndFinish()
             return
         }
@@ -54,7 +60,7 @@ class PermissionsActivity : AppCompatActivity() {
         shizukuButton = findViewById(R.id.btn_grant_shizuku)
 
         findViewById<Button>(R.id.btn_grant_all_required).setOnClickListener {
-            val missingRequired = AppPermissions.requiredRuntimePermissions
+            val missingRequired = AppPermissions.requiredFor(role)
                 .filterNot { AppPermissions.isGranted(this, it) }
             if (missingRequired.isNotEmpty()) {
                 requestMultiplePermissionsLauncher.launch(missingRequired.toTypedArray())
@@ -64,7 +70,7 @@ class PermissionsActivity : AppCompatActivity() {
         }
 
         continueButton.setOnClickListener {
-            if (AppPermissions.hasRequiredRuntimePermissions(this)) {
+            if (AppPermissions.hasRequiredRuntimePermissions(this, role)) {
                 if (viewOnly) {
                     finish()
                 } else {
@@ -146,7 +152,7 @@ class PermissionsActivity : AppCompatActivity() {
             }
         }
 
-        val requiredGranted = AppPermissions.hasRequiredRuntimePermissions(this)
+        val requiredGranted = AppPermissions.hasRequiredRuntimePermissions(this, role)
         continueButton.isEnabled = requiredGranted
         continueButton.text = if (requiredGranted) {
             getString(R.string.permissions_continue)
@@ -154,7 +160,7 @@ class PermissionsActivity : AppCompatActivity() {
             getString(R.string.permissions_continue_locked)
         }
 
-        val missingRequired = AppPermissions.requiredRuntimePermissions.filterNot { AppPermissions.isGranted(this, it) }
+        val missingRequired = AppPermissions.requiredFor(role).filterNot { AppPermissions.isGranted(this, it) }
         if (missingRequired.isNotEmpty()) {
             LogUtils.w(TAG, "Missing required runtime permissions: $missingRequired")
         }

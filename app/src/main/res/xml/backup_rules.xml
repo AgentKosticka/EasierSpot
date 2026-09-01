@@ -6,8 +6,9 @@
    See https://developer.android.com/about/versions/12/backup-restore
 -->
 <full-backup-content>
-    <!--
-   <include domain="sharedpref" path="."/>
-   <exclude domain="sharedpref" path="device.xml"/>
--->
+    <!-- Pairing keys live in Android Keystore and are intentionally device-bound. Restoring the
+         database without those keys would create pairings that can never authenticate. -->
+    <exclude domain="database" path="." />
+    <exclude domain="sharedpref" path="active_client_session.xml" />
+    <exclude domain="sharedpref" path="server_service_state.xml" />
 </full-backup-content>

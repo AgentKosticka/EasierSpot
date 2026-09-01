@@ -16,6 +16,8 @@ import android.content.pm.PackageManager
 import android.os.Build
 import androidx.core.content.ContextCompat
 import com.agentkosticka.easierspot.ble.BleConstants
+import com.agentkosticka.easierspot.ble.BleAuthFraming
+import com.agentkosticka.easierspot.ble.BleDiscoveryProtocol
 import com.agentkosticka.easierspot.ble.BleSessionCrypto
 import com.agentkosticka.easierspot.data.model.HotspotCredentials
 import com.agentkosticka.easierspot.util.LogUtils
@@ -24,6 +26,7 @@ import java.nio.ByteBuffer
 import java.nio.charset.StandardCharsets
 import javax.crypto.spec.SecretKeySpec
 import java.util.ArrayDeque
+import java.util.concurrent.ConcurrentHashMap
 
 data class ClientConnection(
     val address: String,
@@ -50,17 +53,22 @@ class GattServer(private val context: Context, private val deviceId: String) {
     private val _isRunning = MutableStateFlow(false)
 
     private val approvedClients = mutableSetOf<String>()
-    private val clientStableIds = mutableMapOf<String, String>()
+    private val clientStatus = ConcurrentHashMap<String, Byte>()
+    private val clientStableIds = ConcurrentHashMap<String, String>()
     private val approvalNotificationEnabledClients = mutableSetOf<String>()
     private val hotspotNotificationEnabledClients = mutableSetOf<String>()
     private var hotspotCredentials: HotspotCredentials? = null
     private var newClientCallback: ((String, String?) -> Unit)? = null
     private var clientConnectionStateCallback: ((String, Boolean, String?) -> Unit)? = null
+    private var sessionControlCallback: ((String, Byte) -> Unit)? = null
     private var readyCallback: ((Result<Unit>) -> Unit)? = null
     private val serverKeyPair by lazy { BleSessionCrypto.serverKeyPair(context) }
     private var serverHello: BleSessionCrypto.ServerHello? = null
-    private val sessionKeys = mutableMapOf<String, SecretKeySpec>()
+    private val sessionKeys = ConcurrentHashMap<String, SecretKeySpec>()
     private val pairingCodes = mutableMapOf<String, String>()
+    private val lastControlCounters = ConcurrentHashMap<String, Long>()
+    private val clientPublicKeys = ConcurrentHashMap<String, ByteArray>()
+    private val authAssemblies = ConcurrentHashMap<String, BleAuthFraming.Assembler>()
     private data class PendingIndication(
         val address: String,
         val characteristicUuid: java.util.UUID,
@@ -78,7 +86,54 @@ class GattServer(private val context: Context, private val deviceId: String) {
         clientConnectionStateCallback = callback
     }
 
+    fun setSessionControlCallback(callback: (clientStableId: String, signal: Byte) -> Unit) {
+        sessionControlCallback = callback
+    }
+
+    fun stableIdForAddress(clientAddress: String): String? = clientStableIds[clientAddress]
+    fun clientPublicKeyForAddress(clientAddress: String): ByteArray? =
+        clientPublicKeys[clientAddress]?.copyOf()
+
+    /** Returns the authenticated client fingerprint for a fresh distress advertisement. */
+    @Synchronized
+    fun verifyDistress(payload: ByteArray): String? {
+        val counter = runCatching { BleDiscoveryProtocol.distressCounter(payload) }.getOrNull() ?: return null
+        return sessionKeys.entries.firstNotNullOfOrNull { (address, key) ->
+            val previous = lastControlCounters[address] ?: 0L
+            clientStableIds[address]?.takeIf {
+                counter > previous && BleDiscoveryProtocol.verifyDistress(payload, key)
+            }?.also { lastControlCounters[address] = counter }
+        }
+    }
+
     fun getPairingCode(clientAddress: String): String? = pairingCodes[clientAddress]
+
+    @Synchronized
+    private fun consumeAuthFrame(address: String, value: ByteArray): ByteArray? {
+        val frame = BleAuthFraming.parse(value)
+        val assembler = if (frame.index == 0) {
+            BleAuthFraming.Assembler(frame).also { authAssemblies[address] = it }
+        } else {
+            authAssemblies[address] ?: error("Authentication continuation has no first frame")
+        }
+        val complete = if (frame.index == 0) assembler.resultIfComplete() else assembler.accept(frame)
+        if (complete != null) authAssemblies.remove(address)
+        return complete
+    }
+
+    private fun authenticateClient(address: String, value: ByteArray) {
+        val hello = serverHello ?: error("Server handshake is unavailable")
+        val auth = BleSessionCrypto.parseAndVerifyClientAuth(value, hello)
+        val stableId = BleSessionCrypto.fingerprint(auth.publicKey)
+        val key = BleSessionCrypto.sessionKey(serverKeyPair.private, auth.publicKey, hello.nonce)
+        clientStableIds[address] = stableId
+        sessionKeys[address] = key
+        clientPublicKeys[address] = auth.publicKey.encoded.copyOf()
+        lastControlCounters[address] = 0L
+        pairingCodes[address] = BleSessionCrypto.pairingCode(key, hello.nonce)
+        LogUtils.i(TAG, "Authenticated v3 client fingerprint=$stableId")
+        newClientCallback?.invoke(address, stableId)
+    }
 
     fun startServer(onReady: (Result<Unit>) -> Unit = {}) {
         if (!hasBluetoothPermissions()) {
@@ -122,11 +177,15 @@ class GattServer(private val context: Context, private val deviceId: String) {
         _connectedClients.value = emptyList()
         clientStableIds.clear()
         approvedClients.clear()
+        clientStatus.clear()
         approvalNotificationEnabledClients.clear()
         hotspotNotificationEnabledClients.clear()
         hotspotCredentials = null
         sessionKeys.clear()
         pairingCodes.clear()
+        lastControlCounters.clear()
+        clientPublicKeys.clear()
+        authAssemblies.clear()
         serverHello = null
         indicationQueue.clear()
         indicationInFlight = false
@@ -136,6 +195,7 @@ class GattServer(private val context: Context, private val deviceId: String) {
 
     fun approveClient(clientAddress: String) {
         approvedClients.add(clientAddress)
+        clientStatus[clientAddress] = BleConstants.APPROVAL_GRANTED
         _pendingApproval.value = null
         LogUtils.i(TAG, "Client approved: $clientAddress")
 
@@ -144,6 +204,7 @@ class GattServer(private val context: Context, private val deviceId: String) {
     }
 
     fun denyClient(clientAddress: String) {
+        clientStatus[clientAddress] = BleConstants.APPROVAL_DENIED
         LogUtils.i(TAG, "Client denied: $clientAddress")
         // Notify client of denial
         notifyClient(clientAddress, BleConstants.CHAR_APPROVAL_STATUS, byteArrayOf(BleConstants.APPROVAL_DENIED))
@@ -164,7 +225,7 @@ class GattServer(private val context: Context, private val deviceId: String) {
         val plaintext = encodeHotspotData(credentials)
         val payload = BleSessionCrypto.encrypt(key, plaintext, hello.nonce)
         plaintext.fill(0)
-        LogUtils.i(TAG, "Sending hotspot credentials to $clientAddress (ssid=${credentials.ssid})")
+        LogUtils.i(TAG, "Sending encrypted hotspot credentials to authenticated client $clientAddress")
         notifyClient(clientAddress, BleConstants.CHAR_HOTSPOT_DATA, payload)
     }
 
@@ -184,6 +245,24 @@ class GattServer(private val context: Context, private val deviceId: String) {
         }
         indicationQueue.addLast(PendingIndication(clientAddress, characteristicUuid, payload.copyOf()))
         drainIndicationQueue()
+    }
+
+    fun markHotspotStarting(clientAddress: String) {
+        clientStatus[clientAddress] = BleConstants.HOTSPOT_STARTING
+        notifyClient(
+            clientAddress,
+            BleConstants.CHAR_APPROVAL_STATUS,
+            byteArrayOf(BleConstants.HOTSPOT_STARTING)
+        )
+    }
+
+    fun markActivationFailed(clientAddress: String) {
+        clientStatus[clientAddress] = BleConstants.ACTIVATION_FAILED
+        notifyClient(
+            clientAddress,
+            BleConstants.CHAR_APPROVAL_STATUS,
+            byteArrayOf(BleConstants.ACTIVATION_FAILED)
+        )
     }
 
     private fun drainIndicationQueue() {
@@ -268,6 +347,13 @@ class GattServer(private val context: Context, private val deviceId: String) {
         )
         service.addCharacteristic(clientIdChar)
 
+        val sessionControlChar = BluetoothGattCharacteristic(
+            BleConstants.CHAR_SESSION_CONTROL,
+            BluetoothGattCharacteristic.PROPERTY_WRITE or BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE,
+            BluetoothGattCharacteristic.PERMISSION_WRITE
+        )
+        service.addCharacteristic(sessionControlChar)
+
         return service
     }
 
@@ -333,9 +419,11 @@ class GattServer(private val context: Context, private val deviceId: String) {
                     LogUtils.i(TAG, "Client disconnected: ${device.address}")
                     clientConnectionStateCallback?.invoke(device.address, false, clientStableIds[device.address])
                     approvedClients.remove(device.address)
-                    clientStableIds.remove(device.address)
-                    sessionKeys.remove(device.address)
+                    clientStatus.remove(device.address)
+                    // Keep authenticated session material until the server transport stops so a
+                    // short BLE distress burst can still be verified after the GATT link drops.
                     pairingCodes.remove(device.address)
+                    authAssemblies.remove(device.address)
                     indicationQueue.removeAll { it.address == device.address }
                     if (activeIndication?.address == device.address) {
                         activeIndication = null
@@ -380,12 +468,9 @@ class GattServer(private val context: Context, private val deviceId: String) {
                     )
                 }
                 BleConstants.CHAR_APPROVAL_STATUS -> {
-                    val isApproved = device.address in approvedClients
-                    val approvalValue = if (isApproved) {
-                        byteArrayOf(BleConstants.APPROVAL_GRANTED)
-                    } else {
-                        byteArrayOf(BleConstants.APPROVAL_PENDING)
-                    }
+                    val approvalValue = byteArrayOf(
+                        clientStatus[device.address] ?: BleConstants.APPROVAL_PENDING
+                    )
                     gattServer?.sendResponse(
                         device,
                         requestId,
@@ -468,27 +553,15 @@ class GattServer(private val context: Context, private val deviceId: String) {
             super.onCharacteristicWriteRequest(device, requestId, characteristic, preparedWrite, responseNeeded, offset, value)
 
             if (characteristic.uuid == BleConstants.CHAR_CLIENT_ID && value != null && value.isNotEmpty()) {
-                val hello = serverHello
-                val authenticated = runCatching {
-                    require(hello != null) { "Server handshake is unavailable" }
-                    val auth = BleSessionCrypto.parseAndVerifyClientAuth(value, hello)
-                    val stableId = BleSessionCrypto.fingerprint(auth.publicKey)
-                    val key = BleSessionCrypto.sessionKey(
-                        serverKeyPair.private,
-                        auth.publicKey,
-                        hello.nonce
-                    )
-                    clientStableIds[device.address] = stableId
-                    sessionKeys[device.address] = key
-                    pairingCodes[device.address] = BleSessionCrypto.pairingCode(key, hello.nonce)
-                    LogUtils.i(TAG, "Authenticated v2 client fingerprint=$stableId")
-                    newClientCallback?.invoke(device.address, stableId)
+                val assembled = runCatching {
+                    require(!preparedWrite && offset == 0) { "Prepared authentication writes are unsupported" }
+                    consumeAuthFrame(device.address, value)
                 }
-                if (authenticated.isFailure) {
+                if (assembled.isFailure) {
                     LogUtils.w(
                         TAG,
-                        "Rejected unauthenticated client",
-                        authenticated.exceptionOrNull() ?: IllegalArgumentException("Invalid client")
+                        "Rejected invalid authentication frame",
+                        assembled.exceptionOrNull() ?: IllegalArgumentException("Invalid frame")
                     )
                     if (responseNeeded) {
                         gattServer?.sendResponse(
@@ -498,6 +571,60 @@ class GattServer(private val context: Context, private val deviceId: String) {
                             offset,
                             null
                         )
+                    }
+                    return
+                }
+                val completeAuth = assembled.getOrNull()
+                if (completeAuth != null) {
+                    val authenticated = runCatching { authenticateClient(device.address, completeAuth) }
+                    completeAuth.fill(0)
+                    if (authenticated.isFailure) {
+                        LogUtils.w(
+                            TAG,
+                            "Rejected unauthenticated client",
+                            authenticated.exceptionOrNull() ?: IllegalArgumentException("Invalid client")
+                        )
+                        if (responseNeeded) {
+                            gattServer?.sendResponse(
+                                device,
+                                requestId,
+                                BluetoothGatt.GATT_FAILURE,
+                                offset,
+                                null
+                            )
+                        }
+                        return
+                    }
+                }
+            }
+
+            if (characteristic.uuid == BleConstants.CHAR_SESSION_CONTROL && value != null) {
+                val accepted = runCatching {
+                    val key = sessionKeys[device.address] ?: error("Unauthenticated session")
+                    val hello = serverHello ?: error("Server handshake unavailable")
+                    val plaintext = BleSessionCrypto.decrypt(key, value, hello.nonce)
+                    try {
+                        require(plaintext.size == 9) { "Invalid session control length" }
+                        val buffer = ByteBuffer.wrap(plaintext)
+                        val type = buffer.get()
+                        require(type == BleConstants.CONTROL_HEARTBEAT || type == BleConstants.CONTROL_GOODBYE)
+                        val counter = buffer.long
+                        synchronized(this@GattServer) {
+                            require(counter > (lastControlCounters[device.address] ?: 0L)) {
+                                "Replayed session control message"
+                            }
+                            lastControlCounters[device.address] = counter
+                        }
+                        val stableId = clientStableIds[device.address] ?: error("Missing client identity")
+                        sessionControlCallback?.invoke(stableId, type)
+                    } finally {
+                        plaintext.fill(0)
+                    }
+                }.isSuccess
+                if (!accepted) {
+                    LogUtils.w(TAG, "Rejected invalid session control from ${device.address}")
+                    if (responseNeeded) {
+                        gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_FAILURE, offset, null)
                     }
                     return
                 }

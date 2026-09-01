@@ -23,8 +23,8 @@
 
             <ImageButton
                 android:id="@+id/btn_client_settings"
-                android:layout_width="36dp"
-                android:layout_height="36dp"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
                 android:background="?attr/selectableItemBackgroundBorderless"
                 android:contentDescription="@string/action_settings"
                 android:src="@drawable/ic_settings"

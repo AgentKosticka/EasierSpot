@@ -2,366 +2,347 @@
 <issues format="6" by="lint 9.1.0" type="baseline" client="gradle" dependencies="false" name="AGP (9.1.0)" variant="all" version="9.1.0">
 
     <issue
-        id="InlinedApi"
-        message="Field requires API level 31 (current min is 24): `android.Manifest.permission#BLUETOOTH_ADVERTISE`"
-        errorLine1="            Manifest.permission.BLUETOOTH_ADVERTISE"
-        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        id="OldTargetApi"
+        message="Not targeting the latest versions of Android; compatibility modes apply. Consider testing and updating this version. Consult the `android.os.Build.VERSION_CODES` javadoc for details."
+        errorLine1="        targetSdk = 36"
+        errorLine2="        ~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/com/agentkosticka/easierspot/ble/server/BleAdvertiser.kt"
-            line="110"
+            file="build.gradle.kts"
+            line="17"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="AndroidGradlePluginVersion"
+        message="A newer version of com.android.application than 9.1.0 is available: 9.3.2. (There is also a newer version of 9.1.𝑥 available, if upgrading to 9.3.2 is difficult: 9.1.1)"
+        errorLine1="agp = &quot;9.1.0&quot;"
+        errorLine2="      ~~~~~~~">
+        <location
+            file="../gradle/libs.versions.toml"
+            line="2"
+            column="7"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.annotation:annotation than 1.9.1 is available: 1.10.0"
+        errorLine1="annotation = &quot;1.9.1&quot;"
+        errorLine2="             ~~~~~~~">
+        <location
+            file="../gradle/libs.versions.toml"
+            line="3"
+            column="14"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.core:core-ktx than 1.18.0 is available: 1.19.0"
+        errorLine1="coreKtx = &quot;1.18.0&quot;"
+        errorLine2="          ~~~~~~~~">
+        <location
+            file="../gradle/libs.versions.toml"
+            line="4"
+            column="11"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.appcompat:appcompat than 1.7.1 is available: 1.8.0"
+        errorLine1="appcompat = &quot;1.7.1&quot;"
+        errorLine2="            ~~~~~~~">
+        <location
+            file="../gradle/libs.versions.toml"
+            line="9"
             column="13"/>
     </issue>
 
     <issue
-        id="InlinedApi"
-        message="Field requires API level 31 (current min is 24): `android.Manifest.permission#BLUETOOTH_SCAN`"
-        errorLine1="            Manifest.permission.BLUETOOTH_SCAN"
+        id="GradleDependency"
+        message="A newer version of com.google.android.material:material than 1.13.0 is available: 1.14.0"
+        errorLine1="material = &quot;1.13.0&quot;"
+        errorLine2="           ~~~~~~~~">
+        <location
+            file="../gradle/libs.versions.toml"
+            line="10"
+            column="12"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.constraintlayout:constraintlayout than 2.2.1 is available: 2.2.2"
+        errorLine1="constraintlayout = &quot;2.2.1&quot;"
+        errorLine2="                   ~~~~~~~">
+        <location
+            file="../gradle/libs.versions.toml"
+            line="12"
+            column="20"/>
+    </issue>
+
+    <issue
+        id="ObsoleteSdkInt"
+        message="This folder configuration (`v26`) is unnecessary; `minSdkVersion` is 31. Merge all the resources in this folder into `mipmap-anydpi`.">
+        <location
+            file="src/main/res/mipmap-anydpi-v26"/>
+    </issue>
+
+    <issue
+        id="NestedWeights"
+        message="Nested weights are bad for performance"
+        errorLine1="                android:layout_weight=&quot;1&quot; />"
+        errorLine2="                ~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/layout/activity_server.xml"
+            line="81"
+            column="17"/>
+    </issue>
+
+    <issue
+        id="Overdraw"
+        message="Possible overdraw: Root element paints background `?attr/selectableItemBackground` with a theme that also paints a background (inferred theme is `@style/Theme.EasierSpot`)"
+        errorLine1="    android:background=&quot;?attr/selectableItemBackground&quot;"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/layout/item_diagnostic_card.xml"
+            line="6"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.color.green_on_background` appears to be unused"
+        errorLine1="    &lt;color name=&quot;green_on_background&quot;>#102014&lt;/color>"
+        errorLine2="           ~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/colors.xml"
+            line="12"
+            column="12"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.drawable.ic_launcher_background` appears to be unused"
+        errorLine1="&lt;vector xmlns:android=&quot;http://schemas.android.com/apk/res/android&quot;"
+        errorLine2="^">
+        <location
+            file="src/main/res/drawable/ic_launcher_background.xml"
+            line="2"
+            column="1"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.mipmap.ic_launcher_foreground` appears to be unused">
+        <location
+            file="src/main/res/mipmap-hdpi/ic_launcher_foreground.webp"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.drawable.ic_notifications` appears to be unused"
+        errorLine1="&lt;vector xmlns:android=&quot;http://schemas.android.com/apk/res/android&quot;"
+        errorLine2="^">
+        <location
+            file="src/main/res/drawable/ic_notifications.xml"
+            line="1"
+            column="1"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.action_diagnostics` appears to be unused"
+        errorLine1="    &lt;string name=&quot;action_diagnostics&quot;>Diagnostics&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="5"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.select_mode` appears to be unused"
+        errorLine1="    &lt;string name=&quot;select_mode&quot;>Select Mode&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="9"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.connect_to_hotspot_client` appears to be unused"
+        errorLine1="    &lt;string name=&quot;connect_to_hotspot_client&quot;>Connect to Hotspot (Client)&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="10"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.share_hotspot_server` appears to be unused"
+        errorLine1="    &lt;string name=&quot;share_hotspot_server&quot;>Share Hotspot (Server)&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="11"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.permissions_button_external` appears to be unused"
+        errorLine1="    &lt;string name=&quot;permissions_button_external&quot;>Managed externally&lt;/string>"
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/com/agentkosticka/easierspot/ble/client/BleScanner.kt"
+            file="src/main/res/values/strings.xml"
+            line="28"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.theme_mode_label` appears to be unused"
+        errorLine1="    &lt;string name=&quot;theme_mode_label&quot;>Theme mode&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="45"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.diagnostics_open` appears to be unused"
+        errorLine1="    &lt;string name=&quot;diagnostics_open&quot;>Open diagnostics&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="53"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.ble_test_running` appears to be unused"
+        errorLine1="    &lt;string name=&quot;ble_test_running&quot;>Running BLE tests…&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="72"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.ble_test_permissions_missing` appears to be unused"
+        errorLine1="    &lt;string name=&quot;ble_test_permissions_missing&quot;>BLE permissions not granted&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="73"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.export_logs_success` appears to be unused"
+        errorLine1="    &lt;string name=&quot;export_logs_success&quot;>Logs exported&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="100"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.diagnostics_tools_title` appears to be unused"
+        errorLine1="    &lt;string name=&quot;diagnostics_tools_title&quot;>Diagnostic Tools&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="114"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.diagnostics_expand` appears to be unused"
+        errorLine1="    &lt;string name=&quot;diagnostics_expand&quot;>Expand&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
             line="116"
             column="13"/>
     </issue>
 
     <issue
-        id="InlinedApi"
-        message="Field requires API level 31 (current min is 24): `android.Manifest.permission#BLUETOOTH_CONNECT`"
-        errorLine1="            Manifest.permission.BLUETOOTH_CONNECT"
-        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        id="UnusedResources"
+        message="The resource `R.string.diagnostics_collapse` appears to be unused"
+        errorLine1="    &lt;string name=&quot;diagnostics_collapse&quot;>Collapse&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/com/agentkosticka/easierspot/ble/client/GattClient.kt"
-            line="78"
+            file="src/main/res/values/strings.xml"
+            line="117"
             column="13"/>
-    </issue>
-
-    <issue
-        id="InlinedApi"
-        message="Field requires API level 31 (current min is 24): `android.Manifest.permission#BLUETOOTH_SCAN`"
-        errorLine1="                    Manifest.permission.BLUETOOTH_SCAN"
-        errorLine2="                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/java/com/agentkosticka/easierspot/ble/client/GattClient.kt"
-            line="82"
-            column="21"/>
-    </issue>
-
-    <issue
-        id="InlinedApi"
-        message="Field requires API level 31 (current min is 24): `android.Manifest.permission#BLUETOOTH_CONNECT`"
-        errorLine1="            Manifest.permission.BLUETOOTH_CONNECT"
-        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/java/com/agentkosticka/easierspot/ble/server/GattServer.kt"
-            line="158"
-            column="13"/>
-    </issue>
-
-    <issue
-        id="InlinedApi"
-        message="Field requires API level 31 (current min is 24): `android.Manifest.permission#BLUETOOTH_SCAN`"
-        errorLine1="            Manifest.permission.BLUETOOTH_SCAN,"
-        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/java/com/agentkosticka/easierspot/ui/MainActivity.kt"
-            line="40"
-            column="13"/>
-    </issue>
-
-    <issue
-        id="InlinedApi"
-        message="Field requires API level 31 (current min is 24): `android.Manifest.permission#BLUETOOTH_CONNECT`"
-        errorLine1="            Manifest.permission.BLUETOOTH_CONNECT,"
-        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/java/com/agentkosticka/easierspot/ui/MainActivity.kt"
-            line="41"
-            column="13"/>
-    </issue>
-
-    <issue
-        id="InlinedApi"
-        message="Field requires API level 31 (current min is 24): `android.Manifest.permission#BLUETOOTH_ADVERTISE`"
-        errorLine1="            Manifest.permission.BLUETOOTH_ADVERTISE,"
-        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/java/com/agentkosticka/easierspot/ui/MainActivity.kt"
-            line="42"
-            column="13"/>
-    </issue>
-
-    <issue
-        id="InlinedApi"
-        message="Field requires API level 28 (current min is 24): `android.Manifest.permission#FOREGROUND_SERVICE`"
-        errorLine1="        permissions.add(Manifest.permission.FOREGROUND_SERVICE)"
-        errorLine2="                        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/java/com/agentkosticka/easierspot/ui/MainActivity.kt"
-            line="52"
-            column="25"/>
-    </issue>
-
-    <issue
-        id="NewApi"
-        message="Call requires API level 26 (current min is 24): `android.content.ContextWrapper#startForegroundService`"
-        errorLine1="        startForegroundService(serviceIntent)"
-        errorLine2="        ~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/java/com/agentkosticka/easierspot/ui/server/ServerActivity.kt"
-            line="51"
-            column="9"/>
-    </issue>
-
-    <issue
-        id="CoarseFineLocation"
-        message="If you need access to FINE location, you must request both `ACCESS_FINE_LOCATION` and `ACCESS_COARSE_LOCATION`"
-        errorLine1="    &lt;uses-permission android:name=&quot;android.permission.ACCESS_FINE_LOCATION&quot; />"
-        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/AndroidManifest.xml"
-            line="9"
-            column="5"/>
-    </issue>
-
-    <issue
-        id="ForegroundServicePermission"
-        message="foregroundServiceType:connectedDevice requires permission:[android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE]"
-        errorLine1="        &lt;service"
-        errorLine2="        ^">
-        <location
-            file="src/main/AndroidManifest.xml"
-            line="46"
-            column="9"/>
-    </issue>
-
-    <issue
-        id="GradleDependency"
-        message="A newer version of androidx.appcompat:appcompat than 1.6.1 is available: 1.7.1"
-        errorLine1="appcompat = &quot;1.6.1&quot;"
-        errorLine2="            ~~~~~~~">
-        <location
-            file="$HOME/AndroidStudioProjects/EasierSpot/gradle/libs.versions.toml"
-            line="7"
-            column="13"/>
-    </issue>
-
-    <issue
-        id="GradleDependency"
-        message="A newer version of com.google.android.material:material than 1.10.0 is available: 1.13.0"
-        errorLine1="material = &quot;1.10.0&quot;"
-        errorLine2="           ~~~~~~~~">
-        <location
-            file="$HOME/AndroidStudioProjects/EasierSpot/gradle/libs.versions.toml"
-            line="8"
-            column="12"/>
-    </issue>
-
-    <issue
-        id="GradleDependency"
-        message="A newer version of androidx.constraintlayout:constraintlayout than 2.1.4 is available: 2.2.1"
-        errorLine1="constraintlayout = &quot;2.1.4&quot;"
-        errorLine2="                   ~~~~~~~">
-        <location
-            file="$HOME/AndroidStudioProjects/EasierSpot/gradle/libs.versions.toml"
-            line="10"
-            column="20"/>
-    </issue>
-
-    <issue
-        id="GradleDependency"
-        message="A newer version of androidx.room:room-compiler than 2.6.1 is available: 2.8.4"
-        errorLine1="room = &quot;2.6.1&quot;"
-        errorLine2="       ~~~~~~~">
-        <location
-            file="$HOME/AndroidStudioProjects/EasierSpot/gradle/libs.versions.toml"
-            line="12"
-            column="8"/>
-    </issue>
-
-    <issue
-        id="GradleDependency"
-        message="A newer version of androidx.room:room-ktx than 2.6.1 is available: 2.8.4"
-        errorLine1="room = &quot;2.6.1&quot;"
-        errorLine2="       ~~~~~~~">
-        <location
-            file="$HOME/AndroidStudioProjects/EasierSpot/gradle/libs.versions.toml"
-            line="12"
-            column="8"/>
-    </issue>
-
-    <issue
-        id="GradleDependency"
-        message="A newer version of androidx.room:room-runtime than 2.6.1 is available: 2.8.4"
-        errorLine1="room = &quot;2.6.1&quot;"
-        errorLine2="       ~~~~~~~">
-        <location
-            file="$HOME/AndroidStudioProjects/EasierSpot/gradle/libs.versions.toml"
-            line="12"
-            column="8"/>
-    </issue>
-
-    <issue
-        id="NewerVersionAvailable"
-        message="A newer version of com.google.dagger.hilt.android than 2.51 is available: 2.59.2"
-        errorLine1="hilt = &quot;2.51&quot;"
-        errorLine2="       ~~~~~~">
-        <location
-            file="$HOME/AndroidStudioProjects/EasierSpot/gradle/libs.versions.toml"
-            line="13"
-            column="8"/>
-    </issue>
-
-    <issue
-        id="NewerVersionAvailable"
-        message="A newer version of com.google.dagger:hilt-android than 2.51 is available: 2.59.2"
-        errorLine1="hilt = &quot;2.51&quot;"
-        errorLine2="       ~~~~~~">
-        <location
-            file="$HOME/AndroidStudioProjects/EasierSpot/gradle/libs.versions.toml"
-            line="13"
-            column="8"/>
-    </issue>
-
-    <issue
-        id="NewerVersionAvailable"
-        message="A newer version of com.google.dagger:hilt-compiler than 2.51 is available: 2.59.2"
-        errorLine1="hilt = &quot;2.51&quot;"
-        errorLine2="       ~~~~~~">
-        <location
-            file="$HOME/AndroidStudioProjects/EasierSpot/gradle/libs.versions.toml"
-            line="13"
-            column="8"/>
     </issue>
 
     <issue
         id="UnusedResources"
-        message="The resource `R.color.black` appears to be unused"
-        errorLine1="    &lt;color name=&quot;black&quot;>#FF000000&lt;/color>"
-        errorLine2="           ~~~~~~~~~~~~">
+        message="The resource `R.string.connection_status_title` appears to be unused"
+        errorLine1="    &lt;string name=&quot;connection_status_title&quot;>Connection status&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/res/values/colors.xml"
-            line="3"
-            column="12"/>
+            file="src/main/res/values/strings.xml"
+            line="121"
+            column="13"/>
     </issue>
 
     <issue
         id="UnusedResources"
-        message="The resource `R.color.white` appears to be unused"
-        errorLine1="    &lt;color name=&quot;white&quot;>#FFFFFFFF&lt;/color>"
-        errorLine2="           ~~~~~~~~~~~~">
+        message="The resource `R.string.connection_cancel` appears to be unused"
+        errorLine1="    &lt;string name=&quot;connection_cancel&quot;>Cancel&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/res/values/colors.xml"
-            line="4"
-            column="12"/>
+            file="src/main/res/values/strings.xml"
+            line="122"
+            column="13"/>
     </issue>
 
     <issue
-        id="SetTextI18n"
-        message="String literal in `setText` can not be translated. Use Android resources instead."
-        errorLine1="                    scanButton.text = &quot;Stop Scan&quot;"
-        errorLine2="                                       ~~~~~~~~~">
+        id="UnusedResources"
+        message="The resource `R.string.remembered_meta_with_id` appears to be unused"
+        errorLine1="    &lt;string name=&quot;remembered_meta_with_id&quot;>ID: %1$s • %2$s&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/com/agentkosticka/easierspot/ui/client/ClientActivity.kt"
-            line="54"
-            column="40"/>
+            file="src/main/res/values/strings.xml"
+            line="142"
+            column="13"/>
     </issue>
 
     <issue
-        id="SetTextI18n"
-        message="String literal in `setText` can not be translated. Use Android resources instead."
-        errorLine1="                    scanButton.text = &quot;Start Scan&quot;"
-        errorLine2="                                       ~~~~~~~~~~">
+        id="UnusedResources"
+        message="The resource `R.string.approval_identity_id_line` appears to be unused"
+        errorLine1="    &lt;string name=&quot;approval_identity_id_line&quot;>ID: %1$s&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/com/agentkosticka/easierspot/ui/client/ClientActivity.kt"
-            line="57"
-            column="40"/>
+            file="src/main/res/values/strings.xml"
+            line="166"
+            column="13"/>
     </issue>
 
     <issue
-        id="HardcodedText"
-        message="Hardcoded string &quot;Start Scan&quot;, should use `@string` resource"
-        errorLine1="        android:text=&quot;Start Scan&quot;"
-        errorLine2="        ~~~~~~~~~~~~~~~~~~~~~~~~~">
+        id="ButtonOrder"
+        message="Cancel button should be on the left (was &quot;Forget | Cancel | Save&quot;, should be &quot;Cancel | Forget | Save&quot;)"
+        errorLine1="        &lt;Button"
+        errorLine2="         ~~~~~~">
         <location
-            file="src/main/res/layout/activity_client.xml"
-            line="12"
-            column="9"/>
-    </issue>
-
-    <issue
-        id="HardcodedText"
-        message="Hardcoded string &quot;EasierSpot&quot;, should use `@string` resource"
-        errorLine1="        android:text=&quot;EasierSpot&quot;"
-        errorLine2="        ~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/layout/activity_main.xml"
-            line="12"
-            column="9"/>
-    </issue>
-
-    <issue
-        id="HardcodedText"
-        message="Hardcoded string &quot;Select Mode&quot;, should use `@string` resource"
-        errorLine1="        android:text=&quot;Select Mode&quot;"
-        errorLine2="        ~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/layout/activity_main.xml"
-            line="21"
-            column="9"/>
-    </issue>
-
-    <issue
-        id="HardcodedText"
-        message="Hardcoded string &quot;Connect to Hotspot (Client)&quot;, should use `@string` resource"
-        errorLine1="        android:text=&quot;Connect to Hotspot (Client)&quot;"
-        errorLine2="        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/layout/activity_main.xml"
-            line="30"
-            column="9"/>
-    </issue>
-
-    <issue
-        id="HardcodedText"
-        message="Hardcoded string &quot;Share Hotspot (Server)&quot;, should use `@string` resource"
-        errorLine1="        android:text=&quot;Share Hotspot (Server)&quot;"
-        errorLine2="        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/layout/activity_main.xml"
-            line="38"
-            column="9"/>
-    </issue>
-
-    <issue
-        id="HardcodedText"
-        message="Hardcoded string &quot;Share Your Hotspot&quot;, should use `@string` resource"
-        errorLine1="        android:text=&quot;Share Your Hotspot&quot;"
-        errorLine2="        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/layout/activity_server.xml"
-            line="12"
-            column="9"/>
-    </issue>
-
-    <issue
-        id="HardcodedText"
-        message="Hardcoded string &quot;Start Sharing&quot;, should use `@string` resource"
-        errorLine1="        android:text=&quot;Start Sharing&quot;"
-        errorLine2="        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/layout/activity_server.xml"
-            line="22"
-            column="9"/>
-    </issue>
-
-    <issue
-        id="HardcodedText"
-        message="Hardcoded string &quot;Stop Sharing&quot;, should use `@string` resource"
-        errorLine1="        android:text=&quot;Stop Sharing&quot;"
-        errorLine2="        ~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/layout/activity_server.xml"
-            line="31"
-            column="9"/>
+            file="src/main/res/layout/dialog_remembered_device.xml"
+            line="63"
+            column="10"/>
     </issue>
 
 </issues>

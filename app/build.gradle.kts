@@ -54,7 +54,7 @@ dependencies {
     implementation(libs.hiddenapibypass)
     
     // System API stubs for Shizuku AIDL access
-    implementation(project(":system-api-stubs"))
+    compileOnly(project(":system-api-stubs"))
     
     // HiddenApiRefine for type-safe hidden API access
     implementation(libs.runtime)

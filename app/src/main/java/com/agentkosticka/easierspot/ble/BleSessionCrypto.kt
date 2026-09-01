@@ -21,9 +21,10 @@ import javax.crypto.Mac
 import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.SecretKeySpec
 
-/** Cryptographic primitives and bounded binary envelopes for BLE protocol v2. */
+/** Cryptographic primitives and bounded binary envelopes for EasierSpot protocol v3. */
 object BleSessionCrypto {
     private const val KEYSTORE = "AndroidKeyStore"
+    // Identity aliases intentionally survive the wire upgrade so already-paired users keep trust.
     private const val SERVER_ALIAS = "easierspot_v2_server_identity"
     private const val CLIENT_ALIAS = "easierspot_v2_client_identity"
     private const val NONCE_SIZE = 16
@@ -101,11 +102,30 @@ object BleSessionCrypto {
             generateSecret()
         }
         val prk = hmac(nonce, shared)
-        val key = hmac(prk, "EasierSpot BLE v2\u0001".toByteArray()).copyOf(32)
+        val key = hmac(prk, "EasierSpot BLE v3\u0001".toByteArray()).copyOf(32)
         shared.fill(0)
         prk.fill(0)
         return SecretKeySpec(key, "AES")
     }
+
+    /** Stable pairwise key for authenticated discovery wake requests. */
+    fun wakeKey(privateKey: PrivateKey, peerPublicKey: PublicKey): SecretKeySpec {
+        val shared = KeyAgreement.getInstance("ECDH").run {
+            init(privateKey)
+            doPhase(peerPublicKey, true)
+            generateSecret()
+        }
+        val salt = "EasierSpot BLE wake v1".toByteArray()
+        val key = hmac(salt, shared).copyOf(32)
+        shared.fill(0)
+        return SecretKeySpec(key, "AES")
+    }
+
+    /** Stable pairwise key dedicated to the authenticated local-network control channel. */
+    fun controlKey(privateKey: PrivateKey, peerPublicKey: PublicKey): SecretKeySpec =
+        pairwiseKey(privateKey, peerPublicKey, "EasierSpot UDP control v1")
+
+    fun decodePeerPublicKey(encoded: ByteArray): PublicKey = decodePublicKey(encoded)
 
     fun encrypt(key: SecretKeySpec, plaintext: ByteArray, nonce: ByteArray): ByteArray {
         val iv = ByteArray(IV_SIZE).also(SecureRandom()::nextBytes)
@@ -141,6 +161,11 @@ object BleSessionCrypto {
         return number.toString().padStart(6, '0')
     }
 
+    fun hmacTag(key: ByteArray, value: ByteArray, size: Int): ByteArray {
+        require(size in 1..32)
+        return hmac(key, value).copyOf(size)
+    }
+
     private fun transcript(hello: ServerHello, clientPublic: ByteArray): ByteArray =
         hello.nonce + hello.publicKey.encoded + clientPublic
 
@@ -174,4 +199,22 @@ object BleSessionCrypto {
             init(SecretKeySpec(key, "HmacSHA256"))
             doFinal(value)
         }
+
+
+    private fun pairwiseKey(
+        privateKey: PrivateKey,
+        peerPublicKey: PublicKey,
+        label: String
+    ): SecretKeySpec {
+        val shared = KeyAgreement.getInstance("ECDH").run {
+            init(privateKey)
+            doPhase(peerPublicKey, true)
+            generateSecret()
+        }
+        val extracted = hmac(label.toByteArray(Charsets.UTF_8), shared)
+        val key = hmac(extracted, (label + "\u0001").toByteArray(Charsets.UTF_8)).copyOf(32)
+        shared.fill(0)
+        extracted.fill(0)
+        return SecretKeySpec(key, "HmacSHA256")
+    }
 }

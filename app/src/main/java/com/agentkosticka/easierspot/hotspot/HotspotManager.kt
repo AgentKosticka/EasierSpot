@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.content.Intent
 import android.content.Context
 import android.content.pm.PackageManager
+import android.net.IIntResultListener
 import android.net.wifi.IWifiManager
 import android.net.wifi.WifiManager
 import android.os.Build
@@ -12,16 +13,16 @@ import android.os.ResultReceiver
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
+import androidx.core.content.edit
 import com.agentkosticka.easierspot.data.model.HotspotCredentials
+import com.agentkosticka.easierspot.privileged.PrivilegedShellClient
+import com.agentkosticka.easierspot.privileged.ShizukuStateMonitor
 import com.agentkosticka.easierspot.util.LogUtils
 import rikka.shizuku.Shizuku
 import rikka.shizuku.ShizukuBinderWrapper
 import rikka.shizuku.SystemServiceHelper
-import java.io.BufferedReader
-import java.io.InputStreamReader
 import java.lang.reflect.Method
-import java.lang.reflect.Proxy
-import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.delay
 
 /**
  * Diagnostic result for hotspot configuration testing.
@@ -50,6 +51,21 @@ data class WifiVerificationResult(
     val validated: Boolean,
     val detail: String
 )
+
+sealed interface HotspotActivationState {
+    data object Off : HotspotActivationState
+    data object Requesting : HotspotActivationState
+    data object Enabling : HotspotActivationState
+    data object Ready : HotspotActivationState
+    data class Failed(val detail: String) : HotspotActivationState
+}
+
+sealed interface WifiJoinResult {
+    data class Accepted(val detail: String) : WifiJoinResult
+    data class Rejected(val detail: String) : WifiJoinResult
+    data class Verified(val ssid: String) : WifiJoinResult
+    data class Unsupported(val detail: String) : WifiJoinResult
+}
 
 internal data class WifiStatusObservation(
     val ssid: String,
@@ -98,6 +114,8 @@ class HotspotManager(private val context: Context) {
     // Cached IWifiManager for reuse
     private var cachedWifiManager: IWifiManager? = null
 
+    fun isShizukuAvailable(): Boolean = isShizukuReady()
+
     /**
      * Add the supplied network as a normal saved network and actively switch the whole device to
      * it. The platform shell command uses WifiService.connect rather than an app-scoped request.
@@ -107,6 +125,11 @@ class HotspotManager(private val context: Context) {
             return WifiConnectResult(false, "Shizuku is unavailable")
         }
 
+        enableClientWifi()
+        val current = verifyConnectedWifi(credentials.ssid)
+        if (current.authoritative && current.connectedToTarget) {
+            return WifiConnectResult(true, "Already connected to ${credentials.ssid}")
+        }
         val security = when (credentials.securityType) {
             HotspotCredentials.SecurityType.OPEN -> "open"
             HotspotCredentials.SecurityType.WPA3_SAE -> "wpa3"
@@ -129,9 +152,49 @@ class HotspotManager(private val context: Context) {
         val rejectedByWifiService = combined.contains("failed", ignoreCase = true) ||
             combined.contains("error", ignoreCase = true) ||
             combined.contains("unknown command", ignoreCase = true)
-        return WifiConnectResult(
+        val connectResult = WifiConnectResult(
             accepted = result.exitCode == 0 && !rejectedByWifiService,
             detail = combined.ifBlank { "exit=${result.exitCode}" }
+        )
+        if (connectResult.accepted) requestSuggestionReevaluation()
+        return connectResult
+    }
+
+    fun enableClientWifi(): WifiConnectResult = runWifiShellCommand(
+        arrayOf("/system/bin/cmd", "wifi", "set-wifi-enabled", "enabled")
+    )
+
+    fun reconnectClientWifi(): WifiConnectResult = runWifiShellCommand(
+        arrayOf("/system/bin/cmd", "wifi", "reconnect")
+    )
+
+    /**
+     * Fast-path an app-owned suggestion without creating a saved network. Android still owns the
+     * final network selection; Shizuku only enables Wi-Fi, approves this app's suggestions,
+     * requests a scan, and asks WifiService to reconsider its selector. The existing network is
+     * deliberately preserved until Android has associated with the target.
+     */
+    fun prepareSuggestionSelection(expectedSsid: String): WifiConnectResult {
+        if (!isShizukuReady()) return WifiConnectResult(false, "Shizuku is unavailable")
+        enableClientWifi()
+        runWifiShellCommand(
+            arrayOf(
+                "/system/bin/cmd",
+                "wifi",
+                "network-suggestions-set-user-approved",
+                context.packageName,
+                "yes"
+            )
+        )
+        val current = verifyConnectedWifi(expectedSsid)
+        if (current.authoritative && current.connectedToTarget) {
+            return WifiConnectResult(true, "Already connected to $expectedSsid")
+        }
+        val scan = requestSuggestionReevaluation()
+        val reconnect = reconnectClientWifi()
+        return WifiConnectResult(
+            accepted = scan.accepted || reconnect.accepted,
+            detail = listOf(scan.detail, reconnect.detail).filter { it.isNotBlank() }.joinToString("; ")
         )
     }
 
@@ -247,14 +310,14 @@ class HotspotManager(private val context: Context) {
         // Try Shizuku AIDL approach first (most reliable)
         val shizukuResult = getHotspotCredentialsViaShizuku()
         if (shizukuResult != null) {
-            LogUtils.i(TAG, "Got credentials via Shizuku: ssid=${shizukuResult.ssid}")
+            LogUtils.i(TAG, "Retrieved hotspot credentials through the Wi-Fi binder")
             return shizukuResult
         }
 
         // Fallback to shell command
         val shellResult = getHotspotCredentialsViaShell()
         if (shellResult != null) {
-            LogUtils.i(TAG, "Got credentials via shell: ssid=${shellResult.ssid}")
+            LogUtils.i(TAG, "Retrieved hotspot credentials through the privileged fallback")
             return shellResult
         }
 
@@ -482,7 +545,7 @@ class HotspotManager(private val context: Context) {
                 ""
             }
             
-            LogUtils.diag(TAG, "Extracted: ssid='$ssid', passphrase=${if (passphrase.isEmpty()) "(empty)" else "(set)"}")
+            LogUtils.diag(TAG, "Extracted hotspot configuration; passphrase=${if (passphrase.isEmpty()) "empty" else "set"}")
             
             if (ssid.isNotEmpty()) {
                 HotspotCredentials(
@@ -518,7 +581,7 @@ class HotspotManager(private val context: Context) {
                     val ssidBytes = getBytesMethod.invoke(wifiSsid) as? ByteArray
                     if (ssidBytes != null && ssidBytes.isNotEmpty()) {
                         val ssid = ssidBytes.decodeToString()
-                        LogUtils.diag(TAG, "Got SSID via WifiSsid.getBytes(): $ssid")
+                        LogUtils.diag(TAG, "Read SSID through WifiSsid bytes")
                         return ssid
                     }
                 }
@@ -531,7 +594,7 @@ class HotspotManager(private val context: Context) {
         return try {
             val getSsidMethod = configClass.getMethod("getSsid")
             val ssid = getSsidMethod.invoke(softApConfig) as? String ?: ""
-            LogUtils.diag(TAG, "Got SSID via getSsid(): $ssid")
+            LogUtils.diag(TAG, "Read SSID through getSsid")
             ssid
         } catch (e: Exception) {
             LogUtils.w(TAG, "getSsid() failed: ${e.message}")
@@ -684,6 +747,12 @@ class HotspotManager(private val context: Context) {
     fun isHotspotEnabled(): Boolean {
         val wifiManager = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
 
+        val privilegedState = getPrivilegedHotspotState()
+        if (privilegedState == WIFI_AP_STATE_ENABLED) {
+            LogUtils.diag(TAG, "isHotspotEnabled: true (Shizuku IWifiManager)")
+            return true
+        }
+
         val enabledByIsWifiApEnabled = try {
             val method = wifiManager.javaClass.getMethod("isWifiApEnabled")
             (method.invoke(wifiManager) as? Boolean) == true
@@ -698,7 +767,7 @@ class HotspotManager(private val context: Context) {
         val enabledByApState = try {
             val method = wifiManager.javaClass.getMethod("getWifiApState")
             val state = method.invoke(wifiManager) as? Int
-            state == WIFI_AP_STATE_ENABLED || state == WIFI_AP_STATE_ENABLING
+            state == WIFI_AP_STATE_ENABLED
         } catch (_: Exception) {
             false
         }
@@ -721,6 +790,27 @@ class HotspotManager(private val context: Context) {
         return false
     }
 
+    /** Used only for ownership tracking; an enabling hotspot is not ready for credential use. */
+    fun isHotspotStarting(): Boolean {
+        if (getPrivilegedHotspotState() == WIFI_AP_STATE_ENABLING) return true
+        val wifiManager = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+        return runCatching {
+            val method = wifiManager.javaClass.getMethod("getWifiApState")
+            (method.invoke(wifiManager) as? Int) == WIFI_AP_STATE_ENABLING
+        }.getOrDefault(false)
+    }
+
+    private fun getPrivilegedHotspotState(): Int? {
+        if (!isShizukuReady()) return null
+        return try {
+            getOrCreateWifiManager()?.wifiApEnabledState
+        } catch (error: Exception) {
+            LogUtils.d(TAG, "Privileged hotspot state unavailable: ${error.message}")
+            cachedWifiManager = null
+            null
+        }
+    }
+
     /**
      * Turn hotspot on - tries programmatic approach, falls back to user prompt
      * Returns true if hotspot is enabled (either we enabled it or it was already on)
@@ -738,7 +828,8 @@ class HotspotManager(private val context: Context) {
             return false
         }
 
-        if (!startTetheringViaConnector() && !startTetheringViaShell()) {
+        val connectorAccepted = startTetheringViaConnector()
+        if (!connectorAccepted && !startTetheringViaShell().accepted) {
             LogUtils.w(TAG, "Programmatic hotspot enable failed")
             return false
         }
@@ -747,6 +838,79 @@ class HotspotManager(private val context: Context) {
         // observes SoftAP state separately before it reads or transmits credentials.
         return true
     }
+
+    /** Waits for actual SoftAP readiness; accepted privileged calls are not treated as success. */
+    suspend fun ensureHotspotReady(
+        timeoutMs: Long = 35_000L,
+        onState: (HotspotActivationState) -> Unit = {}
+    ): HotspotActivationState {
+        if (isHotspotEnabled()) return HotspotActivationState.Ready.also(onState)
+        if (!isShizukuReady()) {
+            return HotspotActivationState.Failed("Shizuku is unavailable").also(onState)
+        }
+        onState(HotspotActivationState.Requesting)
+        val preferredBackend = activationPreferences().getString(activationBackendKey(), null)
+        var requestedBackend = "connector"
+        val triedShellBackends = linkedSetOf<Int>()
+
+        fun tryNextShell(preferredIndex: Int? = null): Boolean {
+            val attempt = startTetheringViaShell(preferredIndex, triedShellBackends)
+            if (attempt.index >= 0) triedShellBackends += attempt.index
+            if (attempt.accepted) requestedBackend = "shell:${attempt.index}"
+            return attempt.accepted
+        }
+
+        val preferredShell = preferredBackend
+            ?.takeIf { it.startsWith("shell:") }
+            ?.substringAfter(':')
+            ?.toIntOrNull()
+        var requestAccepted = if (preferredShell != null) tryNextShell(preferredShell) else {
+            startTetheringViaConnector().also { if (it) requestedBackend = "connector" }
+        }
+        if (!requestAccepted) {
+            requestAccepted = if (preferredShell != null) {
+                startTetheringViaConnector().also { if (it) requestedBackend = "connector" }
+            } else {
+                tryNextShell()
+            }
+        }
+        if (!requestAccepted) {
+            return HotspotActivationState.Failed("Android rejected every supported hotspot start path")
+                .also(onState)
+        }
+        val startedAt = android.os.SystemClock.elapsedRealtime()
+        var observedProgress = false
+        var fallbackAttempted = requestedBackend.startsWith("shell:")
+        while (android.os.SystemClock.elapsedRealtime() - startedAt < timeoutMs) {
+            if (isHotspotEnabled()) {
+                activationPreferences().edit { putString(activationBackendKey(), requestedBackend) }
+                return HotspotActivationState.Ready.also(onState)
+            }
+            if (isHotspotStarting()) {
+                observedProgress = true
+                onState(HotspotActivationState.Enabling)
+            }
+            val elapsed = android.os.SystemClock.elapsedRealtime() - startedAt
+            if (!observedProgress && elapsed >= 3_000L && !fallbackAttempted) {
+                fallbackAttempted = true
+                tryNextShell()
+            }
+            delay(
+                when {
+                    elapsed < 2_000L -> 100L
+                    elapsed < 5_000L -> 250L
+                    else -> 1_000L
+                }
+            )
+        }
+        return HotspotActivationState.Failed("Timed out waiting for Android hotspot readiness")
+            .also(onState)
+    }
+
+    private fun activationPreferences() =
+        context.getSharedPreferences("hotspot_activation_backends_v1", Context.MODE_PRIVATE)
+
+    private fun activationBackendKey(): String = "backend_${Build.FINGERPRINT.hashCode()}"
 
     /** Stop tethering only when the owning service has established that EasierSpot started it. */
     fun stopHotspot(): Boolean {
@@ -784,38 +948,43 @@ class HotspotManager(private val context: Context) {
         }
     }
 
-    private fun isShizukuReady(): Boolean {
-        return try {
-            Shizuku.pingBinder() && Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
-        } catch (_: Exception) {
-            false
-        }
-    }
+    private fun isShizukuReady(): Boolean = ShizukuStateMonitor.isReady()
 
-    private fun startTetheringViaShell(): Boolean {
+    private data class ShellActivationAttempt(val accepted: Boolean, val index: Int)
+
+    private fun startTetheringViaShell(
+        preferredIndex: Int? = null,
+        excludedIndexes: Set<Int> = emptySet()
+    ): ShellActivationAttempt {
         val commands = listOf(
             arrayOf("/system/bin/cmd", "connectivity", "tether", "start", "wifi"),
-            arrayOf("cmd", "connectivity", "tether", "start", "wifi"),
             arrayOf("/system/bin/cmd", "connectivity", "tether", "start", "--type", "wifi"),
-            arrayOf("cmd", "connectivity", "tether", "start", "--type", "wifi"),
             arrayOf("/system/bin/cmd", "connectivity", "tether", "start"),
-            arrayOf("cmd", "connectivity", "tether", "start"),
             arrayOf("/system/bin/cmd", "tethering", "start", "wifi"),
-            arrayOf("cmd", "tethering", "start", "wifi"),
-            arrayOf("/system/bin/cmd", "tethering", "start", "--type", "wifi"),
-            arrayOf("cmd", "tethering", "start", "--type", "wifi"),
-            arrayOf("/system/bin/cmd", "wifi", "start-softap"),
-            arrayOf("cmd", "wifi", "start-softap"),
-            arrayOf("service", "call", "wifi", "47")
+            arrayOf("/system/bin/cmd", "tethering", "start", "--type", "wifi")
         )
-        for (command in commands) {
-            val result = runShizukuCommand(command)
-            if (result.exitCode == 0) {
-                LogUtils.diag(TAG, "Hotspot start command succeeded: ${command.joinToString(" ")}")
-                return true
+        val order = buildList {
+            if (preferredIndex != null && preferredIndex in commands.indices) add(preferredIndex)
+            addAll(commands.indices.filter { it != preferredIndex })
+        }
+        for (index in order) {
+            if (index in excludedIndexes) continue
+            val command = commands[index]
+            val result = runShizukuCommand(command, timeoutSeconds = 2L)
+            val output = "${result.stdout}\n${result.stderr}"
+            val rejected = listOf(
+                "failed",
+                "error",
+                "unknown command",
+                "not supported",
+                "exception"
+            ).any { output.contains(it, ignoreCase = true) }
+            if (result.exitCode == 0 && !rejected) {
+                LogUtils.diag(TAG, "Hotspot start backend $index accepted the request")
+                return ShellActivationAttempt(true, index)
             }
         }
-        return false
+        return ShellActivationAttempt(false, -1)
     }
 
     private fun startTetheringViaConnector(): Boolean {
@@ -849,7 +1018,7 @@ class HotspotManager(private val context: Context) {
             arrayOf("cmd", "wifi", "stop-softap")
         )
         return commands.any { command ->
-            runShizukuCommand(command).exitCode == 0
+            runShizukuCommand(command, timeoutSeconds = 2L).exitCode == 0
         }
     }
 
@@ -946,9 +1115,7 @@ class HotspotManager(private val context: Context) {
                 param.name == "android.net.TetheringRequestParcel" && isStart -> {
                     createTetheringRequestParcel()
                 }
-                param.name == "android.net.IIntResultListener" -> {
-                    createNoOpBinderInterface(param)
-                }
+                param.name == "android.net.IIntResultListener" -> tetheringResultListener
                 else -> {
                     null
                 }
@@ -1013,33 +1180,14 @@ class HotspotManager(private val context: Context) {
         }
     }
 
-    private fun createNoOpBinderInterface(interfaceClass: Class<*>): Any? {
-        if (!interfaceClass.isInterface) {
-            return null
-        }
-
-        val binder = android.os.Binder()
-        val handler = java.lang.reflect.InvocationHandler { _, method, _ ->
-            when (method.name) {
-                "asBinder" -> binder
-                "onResult" -> null
-                "toString" -> "NoOp${interfaceClass.simpleName}"
-                else -> when (method.returnType) {
-                    Boolean::class.javaPrimitiveType -> false
-                    Int::class.javaPrimitiveType -> 0
-                    Long::class.javaPrimitiveType -> 0L
-                    Float::class.javaPrimitiveType -> 0f
-                    Double::class.javaPrimitiveType -> 0.0
-                    else -> null
-                }
+    private val tetheringResultListener = object : IIntResultListener.Stub() {
+        override fun onResult(resultCode: Int) {
+            if (resultCode == 0) {
+                LogUtils.diag(TAG, "Tethering connector accepted the request")
+            } else {
+                LogUtils.w(TAG, "Tethering connector rejected the request (code=$resultCode)")
             }
         }
-
-        return Proxy.newProxyInstance(
-            interfaceClass.classLoader,
-            arrayOf(interfaceClass),
-            handler
-        )
     }
 
     @SuppressLint("PrivateApi")
@@ -1060,60 +1208,12 @@ class HotspotManager(private val context: Context) {
         }
     }
 
-    private fun runShizukuCommand(command: Array<String>): CommandResult {
-        return try {
-            val process = try {
-                val publicMethod = Shizuku::class.java.getMethod(
-                    "newProcess",
-                    Array<String>::class.java,
-                    Array<String>::class.java,
-                    String::class.java
-                )
-                try {
-                    publicMethod.invoke(null, command, null, null) as Process
-                } catch (_: IllegalAccessException) {
-                    publicMethod.isAccessible = true
-                    publicMethod.invoke(null, command, null, null) as Process
-                }
-            } catch (_: NoSuchMethodException) {
-                val binder = Shizuku.getBinder() ?: return CommandResult(
-                    -1,
-                    "",
-                    "Shizuku binder unavailable"
-                )
-
-                val stubClass = Class.forName($$"moe.shizuku.server.IShizukuService$Stub")
-                val asInterface = stubClass.getMethod("asInterface", android.os.IBinder::class.java)
-                val service = asInterface.invoke(null, binder)
-                    ?: return CommandResult(-1, "", "IShizukuService unavailable")
-
-                val newProcessMethod = service.javaClass.getMethod(
-                    "newProcess",
-                    Array<String>::class.java,
-                    Array<String>::class.java,
-                    String::class.java
-                )
-                val remoteProcess = newProcessMethod.invoke(service, command, null, null)
-                    ?: return CommandResult(-1, "", "IRemoteProcess unavailable")
-
-                val remoteProcessClass = Class.forName("moe.shizuku.server.IRemoteProcess")
-                val processClass = Class.forName("rikka.shizuku.ShizukuRemoteProcess")
-                val ctor = processClass.getDeclaredConstructor(remoteProcessClass)
-                ctor.isAccessible = true
-                ctor.newInstance(remoteProcess) as Process
-            }
-            val completed = process.waitFor(10, TimeUnit.SECONDS)
-            if (!completed) {
-                process.destroy()
-                return CommandResult(-1, "", "command timed out")
-            }
-            val stdout = BufferedReader(InputStreamReader(process.inputStream)).use { it.readText() }
-            val stderr = BufferedReader(InputStreamReader(process.errorStream)).use { it.readText() }
-            val exitCode = process.exitValue()
-            CommandResult(exitCode, stdout.trim(), stderr.trim())
-        } catch (e: Exception) {
-            CommandResult(-1, "", e.message ?: "unknown error")
-        }
+    private fun runShizukuCommand(
+        command: Array<String>,
+        timeoutSeconds: Long = 10L
+    ): CommandResult {
+        val result = PrivilegedShellClient.execute(command, timeoutSeconds * 1_000L)
+        return CommandResult(result.exitCode, result.stdout, result.stderr)
     }
 
     private data class CommandResult(

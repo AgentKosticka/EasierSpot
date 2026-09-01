@@ -14,19 +14,34 @@ import android.os.Handler
 import android.os.Looper
 import android.os.ParcelUuid
 import androidx.core.content.ContextCompat
+import androidx.core.content.edit
 import com.agentkosticka.easierspot.ble.BleConstants
+import com.agentkosticka.easierspot.ble.BleDiscoveryProtocol
 import com.agentkosticka.easierspot.ui.settings.AppPreferences
 import com.agentkosticka.easierspot.util.LogUtils
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import java.security.MessageDigest
 
 /** Owns one advertiser and automatically drops from a short discovery burst to low power. */
 @SuppressLint("MissingPermission")
-class BleAdvertiser(private val context: Context, private val deviceId: String) {
+class BleAdvertiser(
+    private val context: Context,
+    @Suppress("UNUSED_PARAMETER") deviceId: String,
+    private var networkRevision: Int = 0
+) {
     companion object {
         private const val TAG = "BleAdvertiser"
+        private const val SESSION_PREFS = "ble_advertising_session"
+        private const val KEY_SESSION = "session"
+
+        @Synchronized
+        private fun nextAdvertisingSession(context: Context): Int {
+            val preferences = context.getSharedPreferences(SESSION_PREFS, Context.MODE_PRIVATE)
+            val next = (preferences.getInt(KEY_SESSION, 0) + 1) and 0xff
+            preferences.edit { putInt(KEY_SESSION, next) }
+            return next
+        }
     }
 
     private val bluetoothManager = context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
@@ -35,6 +50,10 @@ class BleAdvertiser(private val context: Context, private val deviceId: String) 
     private var advertiser: BluetoothLeAdvertiser? = null
     private var advertiseCallback: AdvertiseCallback? = null
     private var startResult: ((Result<Unit>) -> Unit)? = null
+    private val discoveryToken by lazy { BleDiscoveryProtocol.serverToken(context) }
+    private val advertisingSession = nextAdvertisingSession(context)
+    private var hotspotActive = false
+    private var hotspotStarting = false
 
     private val _isAdvertising = MutableStateFlow(false)
     val isAdvertising: StateFlow<Boolean> = _isAdvertising.asStateFlow()
@@ -43,9 +62,9 @@ class BleAdvertiser(private val context: Context, private val deviceId: String) 
     val advertisingError: StateFlow<String?> = _advertisingError.asStateFlow()
 
     private val downgradeRunnable = Runnable {
-        if (_isAdvertising.value) {
+        if (advertiser != null) {
             LogUtils.i(TAG, "Startup burst complete; switching to configured steady advertising")
-            stopCurrentAdvertisement()
+            if (_isAdvertising.value) stopCurrentAdvertisement()
             startWithMode(
                 mode = sustainedMode(),
                 txPower = sustainedTxPower(),
@@ -165,6 +184,41 @@ class BleAdvertiser(private val context: Context, private val deviceId: String) 
         advertiser = null
     }
 
+    fun setHotspotActive(active: Boolean, revision: Int = networkRevision) {
+        if (hotspotActive == active && networkRevision == revision && (!active || !hotspotStarting)) return
+        hotspotActive = active
+        if (active) hotspotStarting = false
+        networkRevision = revision
+        refreshPayload()
+    }
+
+    fun setHotspotStarting(starting: Boolean) {
+        if (hotspotStarting == starting) return
+        hotspotStarting = starting
+        refreshPayload()
+    }
+
+    private fun refreshPayload() {
+        if (_isAdvertising.value) {
+            mainHandler.removeCallbacks(downgradeRunnable)
+            stopCurrentAdvertisement()
+            startWithMode(sustainedMode(), sustainedTxPower(), reportResult = false)
+        }
+    }
+
+    fun boostForPairedWake() {
+        if (!_isAdvertising.value) return
+        LogUtils.i(TAG, "Temporarily boosting advertisement for authenticated paired wake")
+        mainHandler.removeCallbacks(downgradeRunnable)
+        stopCurrentAdvertisement()
+        startWithMode(
+            AdvertiseSettings.ADVERTISE_MODE_BALANCED,
+            AdvertiseSettings.ADVERTISE_TX_POWER_MEDIUM,
+            reportResult = false
+        )
+        mainHandler.postDelayed(downgradeRunnable, BleConstants.WAKE_BOOST_MS)
+    }
+
     private fun stopCurrentAdvertisement() {
         val callback = advertiseCallback
         advertiseCallback = null
@@ -176,9 +230,15 @@ class BleAdvertiser(private val context: Context, private val deviceId: String) 
     }
 
     private fun discoveryPayload(): ByteArray {
-        val digest = MessageDigest.getInstance("SHA-256")
-            .digest(deviceId.toByteArray(Charsets.UTF_8))
-        return byteArrayOf(BleConstants.PROTOCOL_VERSION) + digest.copyOf(4)
+        val flags = BleConstants.FLAG_AUTOMATIC_ACTIVATION or
+            (if (hotspotActive) BleConstants.FLAG_HOTSPOT_ACTIVE else 0) or
+            (if (hotspotStarting) BleConstants.FLAG_HOTSPOT_STARTING else 0)
+        return BleDiscoveryProtocol.encodeServer(
+            discoveryToken,
+            networkRevision,
+            advertisingSession,
+            flags
+        )
     }
 
     private fun sustainedMode(): Int = when (AppPreferences.getBleAdvertisingInterval(context)) {

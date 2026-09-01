@@ -74,6 +74,15 @@ class BleSessionCryptoTest {
         )
     }
 
+    @Test
+    fun `paired peers derive the same stable wake key`() {
+        val server = keyPair()
+        val client = keyPair()
+        val clientWakeKey = BleSessionCrypto.wakeKey(client.private, server.public)
+        val serverWakeKey = BleSessionCrypto.wakeKey(server.private, client.public)
+        assertArrayEquals(clientWakeKey.encoded, serverWakeKey.encoded)
+    }
+
     private fun keyPair(): KeyPair = KeyPairGenerator.getInstance("EC").run {
         initialize(ECGenParameterSpec("secp256r1"))
         generateKeyPair()

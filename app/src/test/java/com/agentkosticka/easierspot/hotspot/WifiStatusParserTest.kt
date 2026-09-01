@@ -57,4 +57,17 @@ class WifiStatusParserTest {
     fun rejectsUnrecognizedOutput() {
         assertTrue(parseWifiStatus("Wifi is enabled but no client is connected").isEmpty())
     }
+
+    @Test
+    fun parsesOemStyleUnquotedSsid() {
+        val output = """
+            WifiInfo: SSID: EasierSpot Phone, BSSID: 02:00:00:00:00:03, IP: 192.168.50.12, Supplicant state: COMPLETED
+            NetworkCapabilities: Capabilities: INTERNET&TRUSTED
+        """.trimIndent()
+
+        val observation = parseWifiStatus(output).single()
+
+        assertEquals("EasierSpot Phone", observation.ssid)
+        assertTrue(observation.connected)
+    }
 }

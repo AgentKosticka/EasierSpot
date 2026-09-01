@@ -62,4 +62,16 @@
         <item>approve</item>
         <item>deny</item>
     </string-array>
+
+    <string-array name="wifi_connection_mode_entries">
+        <item>@string/pref_wifi_mode_auto</item>
+        <item>@string/pref_wifi_mode_suggestion</item>
+        <item>@string/pref_wifi_mode_shizuku_force</item>
+    </string-array>
+
+    <string-array name="wifi_connection_mode_values">
+        <item>auto</item>
+        <item>suggestion</item>
+        <item>shizuku_force</item>
+    </string-array>
 </resources>

@@ -16,7 +16,11 @@ data class RememberedServer(
     @ColumnInfo(defaultValue = "'approved'")
     val approvalPolicy: String = APPROVAL_POLICY_APPROVED,
     @ColumnInfo(defaultValue = "0")
-    val lastApprovedAt: Long = 0L
+    val lastApprovedAt: Long = 0L,
+    val clientPublicKey: String = "",
+    val wakeCounter: Int = 0,
+    val controlCounter: Long = 0L,
+    val lastControlSeen: Long = 0L
 ) {
     companion object {
         const val APPROVAL_POLICY_APPROVED = "approved"

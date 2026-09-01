@@ -42,37 +42,15 @@
 
     </PreferenceCategory>
 
-    <!-- BLE/Network Category -->
+    <!-- Client Mode Category -->
     <PreferenceCategory
-        app:title="@string/pref_category_ble_network"
+        app:title="@string/pref_category_client_mode"
         app:icon="@drawable/ic_bluetooth">
 
-        <ListPreference
-            app:key="ble_advertising_interval"
-            app:title="@string/pref_ble_advertising_interval_title"
-            app:summary="@string/pref_ble_advertising_interval_summary"
-            app:entries="@array/ble_advertising_interval_entries"
-            app:entryValues="@array/ble_advertising_interval_values"
-            app:defaultValue="slow" />
-
-        <ListPreference
-            app:key="broadcast_strength"
-            app:title="@string/pref_broadcast_strength_title"
-            app:summary="@string/pref_broadcast_strength_summary"
-            app:entries="@array/broadcast_strength_entries"
-            app:entryValues="@array/broadcast_strength_values"
-            app:defaultValue="low" />
-
-        <EditTextPreference
-            app:key="scan_timeout_ms"
-            app:title="@string/pref_scan_timeout_title"
-            app:defaultValue="30000"
-            app:useSimpleSummaryProvider="false" />
-
         <SwitchPreferenceCompat
-            app:key="auto_retry_enabled"
-            app:title="@string/pref_auto_retry_title"
-            app:summary="@string/pref_auto_retry_summary"
+            app:key="background_discovery_enabled"
+            app:title="@string/pref_background_discovery_title"
+            app:summary="@string/pref_background_discovery_summary"
             app:defaultValue="true" />
 
     </PreferenceCategory>
@@ -96,6 +74,36 @@
     <PreferenceCategory
         app:title="@string/pref_category_advanced"
         app:icon="@drawable/ic_advanced">
+
+        <ListPreference
+            app:key="wifi_connection_mode"
+            app:title="@string/pref_wifi_connection_mode_title"
+            app:summary="@string/pref_wifi_connection_mode_summary"
+            app:entries="@array/wifi_connection_mode_entries"
+            app:entryValues="@array/wifi_connection_mode_values"
+            app:defaultValue="auto" />
+
+        <EditTextPreference
+            app:key="scan_timeout_ms"
+            app:title="@string/pref_scan_timeout_title"
+            app:defaultValue="30000"
+            app:useSimpleSummaryProvider="false" />
+
+        <ListPreference
+            app:key="ble_advertising_interval"
+            app:title="@string/pref_ble_advertising_interval_title"
+            app:summary="@string/pref_ble_advertising_interval_summary"
+            app:entries="@array/ble_advertising_interval_entries"
+            app:entryValues="@array/ble_advertising_interval_values"
+            app:defaultValue="slow" />
+
+        <ListPreference
+            app:key="broadcast_strength"
+            app:title="@string/pref_broadcast_strength_title"
+            app:summary="@string/pref_broadcast_strength_summary"
+            app:entries="@array/broadcast_strength_entries"
+            app:entryValues="@array/broadcast_strength_values"
+            app:defaultValue="low" />
 
         <SwitchPreferenceCompat
             app:key="debug_logging_enabled"

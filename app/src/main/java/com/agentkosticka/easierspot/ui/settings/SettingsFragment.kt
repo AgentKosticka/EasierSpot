@@ -10,11 +10,18 @@ import androidx.preference.EditTextPreference
 import androidx.preference.ListPreference
 import androidx.preference.Preference
 import androidx.preference.PreferenceFragmentCompat
+import androidx.preference.SwitchPreferenceCompat
+import androidx.lifecycle.lifecycleScope
 import com.agentkosticka.easierspot.BuildConfig
 import com.agentkosticka.easierspot.R
+import com.agentkosticka.easierspot.ble.client.TrustedServerStore
+import com.agentkosticka.easierspot.hotspot.WifiSuggestionInstaller
 import com.agentkosticka.easierspot.ui.diagnostics.DiagnosticsActivity
 import com.agentkosticka.easierspot.ui.permissions.PermissionsActivity
+import com.agentkosticka.easierspot.service.BleClientService
 import com.agentkosticka.easierspot.util.LogUtils
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 class SettingsFragment : PreferenceFragmentCompat() {
     companion object {
@@ -32,6 +39,7 @@ class SettingsFragment : PreferenceFragmentCompat() {
         setupListPreferenceSummaries()
         setupEditTextPreferenceSummaries()
         setupClickablePreferences()
+        setupBackgroundDiscoveryPreference()
     }
 
     private fun setupThemeListener() {
@@ -128,6 +136,34 @@ class SettingsFragment : PreferenceFragmentCompat() {
             updateListPreferenceSummary(pref, currentValue)
         }
 
+        findPreference<ListPreference>("wifi_connection_mode")?.let { pref ->
+            pref.setOnPreferenceChangeListener { _, newValue ->
+                val value = newValue as String
+                val mode = AppPreferences.WifiConnectionMode.fromValue(value)
+                AppPreferences.setWifiConnectionMode(requireContext(), mode)
+                if (mode == AppPreferences.WifiConnectionMode.SHIZUKU_FORCE) {
+                    val app = requireContext().applicationContext
+                    viewLifecycleOwner.lifecycleScope.launch(Dispatchers.IO) {
+                        TrustedServerStore(app).all()
+                            .map { it.ssid }
+                            .filter { it.isNotBlank() }
+                            .distinct()
+                            .forEach { ssid -> WifiSuggestionInstaller.removeForSsid(app, ssid) }
+                    }
+                }
+                updateWifiConnectionModeSummary(pref, mode)
+                Toast.makeText(
+                    requireContext(),
+                    R.string.wifi_mode_switch_hint,
+                    Toast.LENGTH_LONG
+                ).show()
+                true
+            }
+            val mode = AppPreferences.getWifiConnectionMode(requireContext())
+            pref.value = mode.value
+            updateWifiConnectionModeSummary(pref, mode)
+        }
+
         // App language
         findPreference<ListPreference>("app_language")?.let { pref ->
             pref.setOnPreferenceChangeListener { _, newValue ->
@@ -139,6 +175,34 @@ class SettingsFragment : PreferenceFragmentCompat() {
             val currentValue = AppPreferences.getAppLanguage(requireContext())
             pref.value = currentValue
             updateAppLanguageSummary(pref, currentValue)
+        }
+    }
+
+    private fun setupBackgroundDiscoveryPreference() {
+        findPreference<SwitchPreferenceCompat>("background_discovery_enabled")?.let { pref ->
+            pref.isChecked = AppPreferences.isBackgroundDiscoveryEnabled(requireContext())
+            pref.setOnPreferenceChangeListener { _, newValue ->
+                val enabled = newValue as Boolean
+                AppPreferences.setBackgroundDiscoveryEnabled(requireContext(), enabled)
+                if (enabled) {
+                    runCatching { BleClientService.start(requireContext()) }
+                        .onFailure { LogUtils.w(TAG, "Could not start background discovery", it) }
+                } else {
+                    BleClientService.stop(requireContext())
+                }
+                true
+            }
+        }
+    }
+
+    private fun updateWifiConnectionModeSummary(
+        pref: Preference,
+        mode: AppPreferences.WifiConnectionMode
+    ) {
+        pref.summary = when (mode) {
+            AppPreferences.WifiConnectionMode.AUTO -> getString(R.string.pref_wifi_mode_auto)
+            AppPreferences.WifiConnectionMode.SUGGESTION -> getString(R.string.pref_wifi_mode_suggestion)
+            AppPreferences.WifiConnectionMode.SHIZUKU_FORCE -> getString(R.string.pref_wifi_mode_shizuku_force)
         }
     }
 

@@ -30,14 +30,14 @@
     <string name="permissions_group_ble_title">Bluetooth permissions</string>
     <string name="permissions_group_ble_desc">Used for BLE scanning, pairing, and advertising during hotspot sharing.</string>
     <string name="permissions_item_ble_group">Bluetooth Scan, Connect and Advertise</string>
-    <string name="permissions_group_location_title">Location permissions</string>
-    <string name="permissions_group_location_desc">Android requires location access for BLE discovery and nearby device operations. We do not use your GPS.</string>
-    <string name="permissions_item_location_group">Fine Location</string>
+    <string name="permissions_group_location_title">Nearby Wi-Fi permission</string>
+    <string name="permissions_group_location_desc">Used to confirm and join the paired hotspot. EasierSpot does not collect your location.</string>
+    <string name="permissions_item_location_group">Nearby Wi-Fi devices</string>
     <string name="permissions_group_notifications_title">Notifications</string>
-    <string name="permissions_group_notifications_desc">Needed for foreground service status and approval prompts. Only the device acting as a server needs this permission.</string>
+    <string name="permissions_group_notifications_desc">Needed for server approvals and low-power background discovery of previously paired shared Wi-Fi.</string>
     <string name="permissions_item_notifications">Post Notifications</string>
     <string name="permissions_group_shizuku_title">Shizuku integration</string>
-    <string name="permissions_group_shizuku_desc">Used for privileged hotspot controls in server mode. Used for fetching hotspot config and turning it on in the background. Only the device acting as a server needs this permission</string>
+    <string name="permissions_group_shizuku_desc">Required for server hotspot control. Optional on clients using EasierSpot suggestions; required when “Shizuku force connect” is selected.</string>
     <string name="permissions_item_shizuku">Shizuku</string>
 
     <!-- SettingsActivity -->
@@ -122,11 +122,19 @@
     <string name="connection_cancel">Cancel</string>
     <string name="client_screen_title">Connect to Hotspot</string>
     <string name="client_heading">Find a nearby hotspot</string>
-    <string name="client_subheading">Tap scan to discover trusted servers around you, then choose one to connect.</string>
+    <string name="client_subheading">Scan and pair once. EasierSpot can then discover that server at low power and offer a Connect notification without opening the app.</string>
     <string name="client_scan_start">Start Scan</string>
     <string name="client_scan_stop">Stop Scan</string>
     <string name="client_devices_title">Available devices</string>
     <string name="client_devices_hint">Select a server from the list below to begin pairing.</string>
+    <string name="nearby_easierspot_phone">Nearby EasierSpot phone</string>
+    <string name="paired_tap_connect">Paired · tap to connect</string>
+    <string name="new_phone_tap_pair">New phone · tap to pair</string>
+    <string name="paired_not_nearby">Paired · tap to look nearby · hold to manage</string>
+    <string name="rename_phone">Rename phone</string>
+    <string name="disable_nearby_alerts">Disable nearby alerts</string>
+    <string name="enable_nearby_alerts">Enable nearby alerts</string>
+    <string name="forget_phone">Forget phone</string>
 
     <!-- Remembered devices / approval metadata -->
     <string name="remembered_last_approved_seconds_ago">Last approved: %1$ds ago</string>
@@ -168,7 +176,7 @@
 
     <!-- Preference Categories -->
     <string name="pref_category_general">General</string>
-    <string name="pref_category_ble_network">BLE &amp; Network</string>
+    <string name="pref_category_client_mode">Client Mode</string>
     <string name="pref_category_server_mode">Server Mode</string>
     <string name="pref_category_advanced">Advanced</string>
 
@@ -187,21 +195,26 @@
     <!-- Notification Preferences -->
 
     <!-- BLE/Network Preferences -->
+    <string name="pref_background_discovery_title">Always watch for nearby networks</string>
+    <string name="pref_background_discovery_summary">Let Android watch for paired phones without keeping EasierSpot running; shows a quiet one-tap Connect prompt</string>
+    <string name="pref_wifi_connection_mode_title">Wi-Fi connection method</string>
+    <string name="pref_wifi_connection_mode_summary">Choose exactly one connection method</string>
+    <string name="pref_wifi_mode_auto">Automatic — use the fastest working method and fall back when needed</string>
+    <string name="pref_wifi_mode_suggestion">EasierSpot suggestion — persistent “Available via EasierSpot”; Shizuku may speed up selection without saving a second network</string>
+    <string name="pref_wifi_mode_shizuku_force">Shizuku force connect — immediately runs cmd wifi connect-network and saves the network</string>
+    <string name="wifi_mode_switch_hint">If this method does not work on your ROM, switch to the other Wi-Fi connection method here.</string>
     <string name="pref_ble_advertising_interval_title">BLE advertising interval</string>
-    <string name="pref_ble_advertising_interval_summary">How often to broadcast server presence</string>
+    <string name="pref_ble_advertising_interval_summary">Steady server beacon rate after the short startup or paired wake boost</string>
     <string name="pref_ble_advertising_interval_slow">Slow (1000ms) - Better battery life</string>
     <string name="pref_ble_advertising_interval_balanced">Balanced (250ms) - Recommended</string>
     <string name="pref_ble_advertising_interval_frequent">Frequent (100ms) - Faster discovery</string>
     <string name="pref_broadcast_strength_title">BLE broadcast strength</string>
-    <string name="pref_broadcast_strength_summary">Transmit power used for BLE advertising</string>
+    <string name="pref_broadcast_strength_summary">Transmit power used by steady server advertising</string>
     <string name="pref_broadcast_strength_low">Low - Best battery life</string>
     <string name="pref_broadcast_strength_medium">Medium - Recommended</string>
     <string name="pref_broadcast_strength_high">High - Best range</string>
-    <string name="pref_scan_timeout_title">Scan timeout</string>
-    <string name="pref_scan_timeout_summary">Client scan duration: Currently %1$d seconds</string>
-    <string name="pref_scan_timeout_summary_format">Client scan duration: %1$d seconds</string>
-    <string name="pref_auto_retry_title">Auto-retry connections</string>
-    <string name="pref_auto_retry_summary">Automatically retry failed BLE connections</string>
+    <string name="pref_scan_timeout_title">Manual scan duration</string>
+    <string name="pref_scan_timeout_summary_format">Manual client scan window: %1$d s</string>
 
     <!-- Server Mode Preferences -->
     <string name="pref_default_approval_policy_title">Default approval policy</string>
@@ -209,15 +222,12 @@
     <string name="pref_default_approval_policy_ask">Ask - Prompt for each new device</string>
     <string name="pref_default_approval_policy_approve">Approve - Auto-approve all devices</string>
     <string name="pref_default_approval_policy_deny">Deny - Auto-deny all devices</string>
-    <string name="pref_hotspot_refresh_interval_title">Hotspot refresh interval</string>
-    <string name="pref_hotspot_refresh_interval_summary">Refresh hotspot credentials every %1$d seconds</string>
-    <string name="pref_hotspot_refresh_interval_summary_format">Refresh hotspot credentials every %1$d seconds</string>
 
     <!-- Advanced Preferences -->
     <string name="pref_debug_logging_title">Debug logging</string>
     <string name="pref_debug_logging_summary">Enable verbose logging (may impact performance)</string>
     <string name="pref_battery_optimization_title">Battery optimization</string>
-    <string name="pref_battery_optimization_summary">Manage battery optimization settings for background operation</string>
+    <string name="pref_battery_optimization_summary">Open Android’s battery-optimization list; EasierSpot cannot change this automatically</string>
     <string name="pref_help_about_title">Help &amp; About</string>
     <string name="pref_help_about_summary">App information and settings guide</string>
 
@@ -231,6 +241,10 @@
         <b>Server Mode Requirements:</b><br/>
         • Notifications permission<br/>
         • Shizuku for privileged hotspot access<br/><br/>
+        <b>Client Background Discovery:</b><br/>
+        Enable it in Settings to receive a nearby alert for paired phones without keeping EasierSpot open.<br/><br/>
+        <b>Wi-Fi Connection Method:</b><br/>
+        Suggestion mode keeps “Available via EasierSpot” without creating a second saved network. Shizuku force-connect mode runs Android’s connect-network command and saves the network. The app never runs both methods for one connection.<br/><br/>
         <b>Need Help?</b><br/>
         Visit Diagnostics to troubleshoot Shizuku and hotspot issues. Or you can visit our GitHub repo for reporting issues or further help.
         ]]>
@@ -239,7 +253,30 @@
 
     <!-- Input Validation -->
     <string name="validation_error_scan_timeout">Scan timeout must be between 5 and 300 seconds (5 minutes)</string>
-    <string name="validation_error_hotspot_refresh">Hotspot refresh interval must be between 5 and 600 seconds (10 minutes)</string>
     <string name="validation_error_invalid_number">Please enter a valid number</string>
     <string name="validation_error_generic">Unable to show this message</string>
+
+    <!-- Unified dashboard -->
+    <string name="dashboard_intro">Pair once, then connect from a nearby alert—even when the sharing phone’s hotspot is off.</string>
+    <string name="dashboard_share_title">Share from this phone</string>
+    <string name="dashboard_share_off">Sharing is off. When enabled, paired phones can wake this hotspot.</string>
+    <string name="dashboard_enable_sharing">Enable sharing</string>
+    <string name="dashboard_disable_sharing">Disable sharing</string>
+    <string name="dashboard_manage_sharing">Manage approved phones</string>
+    <string name="dashboard_nearby_title">Nearby and paired phones</string>
+    <string name="dashboard_client_ready">Ready to find a phone or continue a paired connection.</string>
+    <string name="dashboard_connection_status">%1$s\n%2$s</string>
+    <string name="dashboard_find_phones">Find or manage phones</string>
+    <string name="dashboard_health_title">Setup health</string>
+    <string name="dashboard_health_checking">Checking Bluetooth, notifications, Shizuku, and paired phones…</string>
+    <string name="dashboard_copy_report">Copy last connection report</string>
+    <string name="dashboard_report_copied">Connection report copied</string>
+    <string name="dashboard_server_waiting_shizuku">Waiting for Shizuku. Sharing will resume automatically when it starts.</string>
+    <string name="dashboard_server_starting">Starting secure Bluetooth sharing…</string>
+    <string name="dashboard_server_advertising">Available nearby. The hotspot will start only when a paired phone connects.</string>
+    <string name="dashboard_server_pending">A phone is waiting for approval.</string>
+    <string name="dashboard_server_hotspot">A paired phone connected. Starting the hotspot…</string>
+    <string name="dashboard_server_sharing">Sharing is active and authenticated clients are being monitored.</string>
+    <string name="dashboard_server_audio">Sharing is briefly paused for Bluetooth audio.</string>
+    <string name="dashboard_server_attention">Sharing needs attention. EasierSpot will keep trying.</string>
 </resources>
