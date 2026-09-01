@@ -65,8 +65,15 @@ class EasierSpotSharedConnectivityService : SharedConnectivityService(), SharedC
                 return@launch
             }
             val now = System.currentTimeMillis()
+            val selectedDeviceId = selectedNetwork?.deviceId
             val present = store.all().filter { it.isRecentlyPresent(now) }
-            val networks = present.map { HotspotNetworkMapper.map(it, liveHotspotActive) }
+            val networks = present.map { profile ->
+                HotspotNetworkMapper.map(
+                    profile,
+                    forceHotspotActive = liveHotspotActive &&
+                        selectedDeviceId == stableSharedConnectivityDeviceId(profile.fingerprint)
+                )
+            }
             val earliestExpiry = present.minOfOrNull { it.lastPresenceAt + PRESENCE_WINDOW_MS }
             withContext(Dispatchers.Main) {
                 setHotspotNetworks(networks)
