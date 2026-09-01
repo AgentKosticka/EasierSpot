@@ -16,18 +16,20 @@ import com.agentkosticka.easierspot.BuildConfig
 import com.agentkosticka.easierspot.R
 import com.agentkosticka.easierspot.ble.client.TrustedServerStore
 import com.agentkosticka.easierspot.hotspot.WifiSuggestionInstaller
+import com.agentkosticka.easierspot.shared.SharedConnectivityActivation
+import com.agentkosticka.easierspot.shared.SharedConnectivityCapability
 import com.agentkosticka.easierspot.ui.diagnostics.DiagnosticsActivity
 import com.agentkosticka.easierspot.ui.permissions.PermissionsActivity
 import com.agentkosticka.easierspot.service.BleClientService
 import com.agentkosticka.easierspot.util.LogUtils
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class SettingsFragment : PreferenceFragmentCompat() {
     companion object {
         private const val TAG = "SettingsFragment"
     }
-
 
     override fun onCreatePreferences(savedInstanceState: Bundle?, rootKey: String?) {
         preferenceManager.sharedPreferencesName = AppPreferences.PREFS_NAME
@@ -40,6 +42,7 @@ class SettingsFragment : PreferenceFragmentCompat() {
         setupEditTextPreferenceSummaries()
         setupClickablePreferences()
         setupBackgroundDiscoveryPreference()
+        setupSystemWifiPickerStatus()
     }
 
     private fun setupThemeListener() {
@@ -90,6 +93,34 @@ class SettingsFragment : PreferenceFragmentCompat() {
         findPreference<Preference>("help_about")?.setOnPreferenceClickListener {
             showHelpAboutDialog()
             true
+        }
+    }
+
+    private fun setupSystemWifiPickerStatus() {
+        val pref = findPreference<Preference>("system_wifi_picker_status") ?: return
+        pref.summary = getString(R.string.pref_system_wifi_picker_checking)
+        lifecycleScope.launch(Dispatchers.IO) {
+            val diagnostics = SharedConnectivityActivation.diagnostics(requireContext().applicationContext)
+            withContext(Dispatchers.Main) {
+                if (!isAdded) return@withContext
+                pref.summary = when (val capability = diagnostics.capability) {
+                    SharedConnectivityCapability.ApiUnavailable ->
+                        getString(R.string.pref_system_wifi_picker_unavailable)
+                    SharedConnectivityCapability.ProviderAlreadyConfigured,
+                    SharedConnectivityCapability.ProviderActivated ->
+                        getString(R.string.pref_system_wifi_picker_active)
+                    is SharedConnectivityCapability.Blocked ->
+                        getString(R.string.pref_system_wifi_picker_blocked, capability.reason)
+                }
+                pref.setOnPreferenceClickListener {
+                    AlertDialog.Builder(requireContext())
+                        .setTitle(R.string.pref_system_wifi_picker_title)
+                        .setMessage(diagnostics.report())
+                        .setPositiveButton(android.R.string.ok, null)
+                        .show()
+                    true
+                }
+            }
         }
     }
 
@@ -232,7 +263,6 @@ class SettingsFragment : PreferenceFragmentCompat() {
             pref.text = currentValue.toString()
             pref.summary = getString(R.string.pref_scan_timeout_summary_format, currentValue / 1000)
         }
-
     }
 
     private fun updateListPreferenceSummary(pref: Preference, value: String) {

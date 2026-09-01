@@ -7,17 +7,19 @@ import java.util.Date
 
 /** Small, durable, credential-free history for the latest client connection attempt. */
 class ConnectionDiagnostics(context: Context) {
-    private val prefs = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+    private val appContext = context.applicationContext
+    private val prefs = appContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
     @Synchronized
     fun begin(target: String) {
+        val trigger = ConnectTriggerStore.consume(appContext)
         prefs.edit {
             putLong(KEY_STARTED, System.currentTimeMillis())
             putString(KEY_TARGET, "paired-phone-${target.hashCode().toUInt().toString(16).take(6)}")
             putString(KEY_EVENTS, "")
             remove(KEY_RESULT)
         }
-        event("attempt_started")
+        event("attempt_started trigger=${trigger?.name ?: "UNKNOWN"}")
     }
 
     @Synchronized

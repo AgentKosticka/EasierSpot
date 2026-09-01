@@ -139,6 +139,12 @@ object WifiSuggestionInstaller {
             .setIsHiddenSsid(credentials.isHidden)
             .setIsInitialAutojoinEnabled(autojoinEnabled)
             .apply {
+                // Android rejects credential sharing for open networks. Secure EasierSpot
+                // suggestions are explicitly shareable so they can be selected manually once the
+                // AP is actually visible in Settings.
+                if (credentials.securityType != HotspotCredentials.SecurityType.OPEN) {
+                    setCredentialSharedWithUser(true)
+                }
                 when (credentials.securityType) {
                     HotspotCredentials.SecurityType.OPEN -> Unit
                     HotspotCredentials.SecurityType.WPA2_PSK,

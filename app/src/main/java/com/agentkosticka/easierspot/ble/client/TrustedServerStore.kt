@@ -8,6 +8,8 @@ import com.agentkosticka.easierspot.data.db.AppDatabase
 import com.agentkosticka.easierspot.data.model.HotspotCredentials
 import com.agentkosticka.easierspot.data.model.TrustedServerEntity
 
+const val PRESENCE_WINDOW_MS = 90_000L
+
 data class TrustedServerProfile(
     val fingerprint: String,
     val discoveryToken: String,
@@ -28,11 +30,15 @@ data class TrustedServerProfile(
     val controlCounter: Long = 0L,
     val lastAlertAt: Long = 0L,
     val lastAlertRevision: Int = -1,
-    val lastPresenceAt: Long = 0L
+    val lastPresenceAt: Long = 0L,
+    val lastPresenceFlags: Int = 0
 ) {
     val label: String get() = nickname?.takeIf(String::isNotBlank) ?: ssid.ifBlank { displayName }
     val networkRevision: Int get() = advertisedRevision
 }
+
+fun TrustedServerProfile.isRecentlyPresent(now: Long = System.currentTimeMillis()): Boolean =
+    lastPresenceAt > 0L && now >= lastPresenceAt && now - lastPresenceAt < PRESENCE_WINDOW_MS
 
 internal fun shouldAlertForPresence(
     profile: TrustedServerProfile,
@@ -57,7 +63,35 @@ class TrustedServerStore(context: Context) {
     fun findByFingerprint(fingerprint: String): TrustedServerProfile? =
         dao.findByFingerprint(fingerprint)?.toProfile()
 
-    fun remember(profile: TrustedServerProfile) = dao.upsert(profile.toEntity())
+    /**
+     * Upserts trust data without allowing a stale connection snapshot to erase newer presence,
+     * alert de-duplication, or authenticated monotonic counters written by background work.
+     */
+    @Synchronized
+    fun remember(profile: TrustedServerProfile) {
+        val current = findByFingerprint(profile.fingerprint)
+        if (current == null) {
+            dao.upsert(profile.toEntity())
+            return
+        }
+        val keepCurrentPresence = current.lastPresenceAt > profile.lastPresenceAt
+        val keepCurrentAlert = current.lastAlertAt > profile.lastAlertAt
+        dao.upsert(
+            profile.copy(
+                lastSeen = maxOf(profile.lastSeen, current.lastSeen),
+                wakeCounter = maxOf(profile.wakeCounter, current.wakeCounter),
+                controlCounter = maxOf(profile.controlCounter, current.controlCounter),
+                lastPresenceAt = maxOf(profile.lastPresenceAt, current.lastPresenceAt),
+                lastPresenceFlags = if (keepCurrentPresence) {
+                    current.lastPresenceFlags
+                } else profile.lastPresenceFlags,
+                lastAlertAt = maxOf(profile.lastAlertAt, current.lastAlertAt),
+                lastAlertRevision = if (keepCurrentAlert) {
+                    current.lastAlertRevision
+                } else profile.lastAlertRevision
+            ).toEntity()
+        )
+    }
 
     fun forget(fingerprint: String) = dao.delete(fingerprint)
 
@@ -89,7 +123,8 @@ class TrustedServerStore(context: Context) {
         revision: Int,
         _advertisingSession: Int,
         now: Long,
-        absenceMs: Long = 90_000L
+        flags: Int = 0,
+        absenceMs: Long = PRESENCE_WINDOW_MS
     ): Pair<TrustedServerProfile, Boolean>? {
         val profile = findByToken(token) ?: return null
         // Advertising sessions rotate whenever the server restarts its advertiser. They are useful
@@ -100,6 +135,7 @@ class TrustedServerStore(context: Context) {
             advertisedRevision = revision,
             lastSeen = now,
             lastPresenceAt = now,
+            lastPresenceFlags = flags,
             lastAlertAt = if (shouldAlert) now else profile.lastAlertAt,
             // Durable de-duplication survives process death and advertiser restarts.
             lastAlertRevision = if (shouldAlert) alertIdentity else profile.lastAlertRevision
@@ -146,7 +182,8 @@ class TrustedServerStore(context: Context) {
         controlCounter = controlCounter,
         lastAlertAt = lastAlertAt,
         lastAlertRevision = lastAlertRevision,
-        lastPresenceAt = lastPresenceAt
+        lastPresenceAt = lastPresenceAt,
+        lastPresenceFlags = lastPresenceFlags
     )
 
     private fun TrustedServerProfile.toEntity() = TrustedServerEntity(
@@ -169,7 +206,7 @@ class TrustedServerStore(context: Context) {
         controlCounter = controlCounter,
         lastAlertAt = lastAlertAt,
         lastAlertRevision = lastAlertRevision,
-        lastPresenceAt = lastPresenceAt
+        lastPresenceAt = lastPresenceAt,
+        lastPresenceFlags = lastPresenceFlags
     )
-
 }
