@@ -1,7 +1,6 @@
 package com.agentkosticka.easierspot.shared
 
 import android.net.wifi.WifiInfo
-import android.net.wifi.WifiSsid
 import android.net.wifi.sharedconnectivity.app.HotspotNetwork
 import android.net.wifi.sharedconnectivity.app.NetworkProviderInfo
 import android.os.Bundle
@@ -36,9 +35,9 @@ object HotspotNetworkMapper {
         val hotspotActive = forceHotspotActive ||
             profile.lastPresenceFlags and BleConstants.FLAG_HOTSPOT_ACTIVE != 0
         if (hotspotActive && profile.ssid.isNotBlank()) {
-            builder.setHotspotSsid(
-                WifiSsid.fromBytes(profile.ssid.toByteArray(Charsets.UTF_8)).toString()
-            )
+            // HotspotNetwork uses WifiInfo/WifiConfiguration SSID formatting: UTF-8 SSIDs are
+            // represented as quoted text. EasierSpot persists the human-readable raw SSID.
+            builder.setHotspotSsid("\"${profile.ssid}\"")
             sharedSecurityTypes(profile.securityType).forEach { type ->
                 builder.addHotspotSecurityType(type)
             }
