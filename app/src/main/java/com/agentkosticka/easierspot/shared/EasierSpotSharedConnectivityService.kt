@@ -15,6 +15,8 @@ import com.agentkosticka.easierspot.ble.client.TrustedServerStore
 import com.agentkosticka.easierspot.ble.client.isRecentlyPresent
 import com.agentkosticka.easierspot.service.BleClientService
 import com.agentkosticka.easierspot.service.ClientConnectionState
+import com.agentkosticka.easierspot.service.ConnectTrigger
+import com.agentkosticka.easierspot.service.TrustedConnectLauncher
 import com.agentkosticka.easierspot.util.LogUtils
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -58,6 +60,10 @@ class EasierSpotSharedConnectivityService : SharedConnectivityService(), SharedC
     override fun requestRepublish() {
         mainHandler.removeCallbacks(expiryRefresh)
         scope.launch {
+            if (!SharedConnectivityActivation.capability().isActive) {
+                withContext(Dispatchers.Main) { setHotspotNetworks(emptyList()) }
+                return@launch
+            }
             val now = System.currentTimeMillis()
             val present = store.all().filter { it.isRecentlyPresent(now) }
             val networks = present.map { HotspotNetworkMapper.map(it, liveHotspotActive) }
@@ -75,6 +81,10 @@ class EasierSpotSharedConnectivityService : SharedConnectivityService(), SharedC
         selectedNetwork = network
         publishStatus(HotspotNetworkConnectionStatus.CONNECTION_STATUS_ENABLING_HOTSPOT, network)
         scope.launch {
+            if (!SharedConnectivityActivation.capability().isActive) {
+                publishStatus(HotspotNetworkConnectionStatus.CONNECTION_STATUS_UNKNOWN_ERROR, network)
+                return@launch
+            }
             val profile = resolveProfile(network)
             if (profile == null || !profile.isRecentlyPresent()) {
                 publishStatus(
@@ -84,7 +94,11 @@ class EasierSpotSharedConnectivityService : SharedConnectivityService(), SharedC
                 return@launch
             }
             LogUtils.i(TAG, "System Wi-Fi picker requested ${profile.label}")
-            BleClientService.connectTrusted(applicationContext, profile.discoveryToken)
+            TrustedConnectLauncher.connect(
+                applicationContext,
+                profile.discoveryToken,
+                ConnectTrigger.SYSTEM_WIFI_PICKER
+            )
         }
     }
 
