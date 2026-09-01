@@ -63,7 +63,35 @@ class TrustedServerStore(context: Context) {
     fun findByFingerprint(fingerprint: String): TrustedServerProfile? =
         dao.findByFingerprint(fingerprint)?.toProfile()
 
-    fun remember(profile: TrustedServerProfile) = dao.upsert(profile.toEntity())
+    /**
+     * Upserts trust data without allowing a stale connection snapshot to erase newer presence,
+     * alert de-duplication, or authenticated monotonic counters written by background work.
+     */
+    @Synchronized
+    fun remember(profile: TrustedServerProfile) {
+        val current = findByFingerprint(profile.fingerprint)
+        if (current == null) {
+            dao.upsert(profile.toEntity())
+            return
+        }
+        val keepCurrentPresence = current.lastPresenceAt > profile.lastPresenceAt
+        val keepCurrentAlert = current.lastAlertAt > profile.lastAlertAt
+        dao.upsert(
+            profile.copy(
+                lastSeen = maxOf(profile.lastSeen, current.lastSeen),
+                wakeCounter = maxOf(profile.wakeCounter, current.wakeCounter),
+                controlCounter = maxOf(profile.controlCounter, current.controlCounter),
+                lastPresenceAt = maxOf(profile.lastPresenceAt, current.lastPresenceAt),
+                lastPresenceFlags = if (keepCurrentPresence) {
+                    current.lastPresenceFlags
+                } else profile.lastPresenceFlags,
+                lastAlertAt = maxOf(profile.lastAlertAt, current.lastAlertAt),
+                lastAlertRevision = if (keepCurrentAlert) {
+                    current.lastAlertRevision
+                } else profile.lastAlertRevision
+            ).toEntity()
+        )
+    }
 
     fun forget(fingerprint: String) = dao.delete(fingerprint)
 
