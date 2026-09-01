@@ -53,6 +53,11 @@
             app:summary="@string/pref_background_discovery_summary"
             app:defaultValue="true" />
 
+        <Preference
+            app:key="system_wifi_picker_status"
+            app:title="@string/pref_system_wifi_picker_title"
+            app:summary="@string/pref_system_wifi_picker_checking" />
+
     </PreferenceCategory>
 
     <!-- Server Mode Category -->

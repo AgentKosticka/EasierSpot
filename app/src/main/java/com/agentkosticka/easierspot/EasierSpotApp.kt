@@ -7,7 +7,9 @@ import com.agentkosticka.easierspot.ui.settings.ThemePreferences
 import com.agentkosticka.easierspot.util.LogUtils
 import com.agentkosticka.easierspot.ble.client.BleDiscoveryRegistrar
 import com.agentkosticka.easierspot.privileged.PrivilegedShellClient
+import com.agentkosticka.easierspot.privileged.ShizukuState
 import com.agentkosticka.easierspot.privileged.ShizukuStateMonitor
+import com.agentkosticka.easierspot.shared.SharedConnectivityBackends
 import org.lsposed.hiddenapibypass.HiddenApiBypass
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -28,6 +30,16 @@ class EasierSpotApp : Application() {
         ShizukuStateMonitor.initialize(this)
         UpdateCheckCoordinator.initialize(this)
         UpdateCheckCoordinator.triggerIfStale(this)
-        appScope.launch { BleDiscoveryRegistrar.reconcile(this@EasierSpotApp) }
+        appScope.launch {
+            BleDiscoveryRegistrar.reconcile(this@EasierSpotApp)
+            SharedConnectivityBackends.current.reconcile(this@EasierSpotApp)
+        }
+        appScope.launch {
+            ShizukuStateMonitor.state.collect { state ->
+                if (state == ShizukuState.READY) {
+                    SharedConnectivityBackends.current.reconcile(this@EasierSpotApp)
+                }
+            }
+        }
     }
 }
