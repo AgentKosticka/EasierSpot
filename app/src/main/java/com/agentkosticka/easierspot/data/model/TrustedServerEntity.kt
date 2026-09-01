@@ -1,5 +1,6 @@
 package com.agentkosticka.easierspot.data.model
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
@@ -27,5 +28,6 @@ data class TrustedServerEntity(
     val lastAlertAt: Long = 0L,
     val lastAlertRevision: Int = -1,
     val lastPresenceAt: Long = 0L,
+    @ColumnInfo(defaultValue = "0")
     val lastPresenceFlags: Int = 0
 )
