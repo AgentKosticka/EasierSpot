@@ -1,5 +1,6 @@
 package com.agentkosticka.easierspot.shared
 
+import android.content.ComponentName
 import android.content.Context
 import android.os.Build
 import com.agentkosticka.easierspot.privileged.PrivilegedShellClient
@@ -12,6 +13,8 @@ object SharedConnectivityActivation {
     private const val PACKAGE_RESOURCE = "config_sharedConnectivityServicePackage"
     private const val ACTION_RESOURCE = "config_sharedConnectivityServiceIntentAction"
     private const val ENABLED_RESOURCE = "config_hotspotNetworksEnabledForService"
+    private const val SERVICE_CLASS =
+        "com.agentkosticka.easierspot.shared.EasierSpotSharedConnectivityService"
 
     @Volatile
     private var lastCapability: SharedConnectivityCapability =
@@ -30,7 +33,60 @@ object SharedConnectivityActivation {
                 hotspotNetworksEnabled == true
     }
 
+    data class Diagnostics(
+        val androidApi: Int,
+        val apiAvailable: Boolean,
+        val configuredProviderPackage: String?,
+        val configuredProviderAction: String?,
+        val hotspotNetworksEnabled: Boolean?,
+        val providerServiceDeclared: Boolean,
+        val activationMethod: String,
+        val capability: SharedConnectivityCapability
+    ) {
+        fun report(): String = buildString {
+            appendLine("Android API: $androidApi")
+            appendLine("Shared Connectivity API available: $apiAvailable")
+            appendLine("Configured provider package: ${configuredProviderPackage ?: "unavailable"}")
+            appendLine("Configured provider action: ${configuredProviderAction ?: "unavailable"}")
+            appendLine("Hotspot network UI enabled: ${hotspotNetworksEnabled ?: "unavailable"}")
+            appendLine("EasierSpot provider service declared: $providerServiceDeclared")
+            appendLine("Activation method: $activationMethod")
+            append("Native picker status: ${capabilityLabel(capability)}")
+        }
+    }
+
     fun capability(): SharedConnectivityCapability = lastCapability
+
+    /** Runs off main. This intentionally returns the exact framework state used by capability gating. */
+    fun diagnostics(context: Context): Diagnostics {
+        val app = context.applicationContext
+        val capability = reconcile(app)
+        val config = if (Build.VERSION.SDK_INT >= 34) {
+            directFrameworkConfig(app) ?: if (ShizukuStateMonitor.isReady()) {
+                shellFrameworkConfig()
+            } else null
+        } else null
+        val serviceDeclared = runCatching {
+            @Suppress("DEPRECATION")
+            app.packageManager.getServiceInfo(ComponentName(app.packageName, SERVICE_CLASS), 0)
+        }.isSuccess
+        val activationMethod = when (capability) {
+            SharedConnectivityCapability.ApiUnavailable -> "none (API unavailable)"
+            SharedConnectivityCapability.ProviderAlreadyConfigured -> "framework already configured"
+            SharedConnectivityCapability.ProviderActivated -> "existing shell-enableable overlay"
+            is SharedConnectivityCapability.Blocked -> "none (blocked)"
+        }
+        return Diagnostics(
+            androidApi = Build.VERSION.SDK_INT,
+            apiAvailable = Build.VERSION.SDK_INT >= 34,
+            configuredProviderPackage = config?.packageName,
+            configuredProviderAction = config?.action,
+            hotspotNetworksEnabled = config?.hotspotNetworksEnabled,
+            providerServiceDeclared = serviceDeclared,
+            activationMethod = activationMethod,
+            capability = capability
+        )
+    }
 
     fun reconcile(context: Context): SharedConnectivityCapability {
         val app = context.applicationContext
@@ -134,10 +190,17 @@ object SharedConnectivityActivation {
 
     private fun parseEasierSpotOverlayCandidates(output: String): List<OverlayCandidate> =
         output.lineSequence().mapNotNull { line ->
-            val match = Regex("""^\\s*\\[([ xX])\\]\\s+([A-Za-z0-9_.]+)\\s*$""").find(line)
+            val match = Regex("""^\s*\[([ xX])\]\s+([A-Za-z0-9_.]+)\s*$""").find(line)
                 ?: return@mapNotNull null
             val packageName = match.groupValues[2]
             if (!packageName.contains("easierspot", ignoreCase = true)) return@mapNotNull null
             OverlayCandidate(packageName, match.groupValues[1].equals("x", ignoreCase = true))
         }.toList()
+
+    private fun capabilityLabel(capability: SharedConnectivityCapability): String = when (capability) {
+        SharedConnectivityCapability.ApiUnavailable -> "Unavailable on Android 12–13"
+        SharedConnectivityCapability.ProviderAlreadyConfigured -> "Active"
+        SharedConnectivityCapability.ProviderActivated -> "Active (overlay activated)"
+        is SharedConnectivityCapability.Blocked -> "Blocked: ${capability.reason}"
+    }
 }
