@@ -20,6 +20,8 @@ sealed interface ClientConnectionState {
         val serverToken: String,
         val label: String,
         val ssid: String,
+        // Kept for source compatibility with the existing connection reducer. EasierSpot does
+        // not wait for, retry, or expose Android's internet-validation state to the user.
         val internet: InternetStatus = InternetStatus.NOT_CONFIRMED,
         val controlAvailable: Boolean = true,
         val activeClientCount: Int = 1,
@@ -76,18 +78,12 @@ internal fun ClientConnectionState.titleAndText(): Pair<String, String> = when (
     is ClientConnectionState.ReceivingCredentials -> "${label} is ready" to "Receiving the secure Wi-Fi details…"
     is ClientConnectionState.JoiningWifi -> "Connecting to $ssid" to when {
         fallbackActive -> "The first method stalled; EasierSpot is trying Android's fallback automatically…"
-        takingLonger -> "Android is still switching Wi-Fi. EasierSpot will keep watching for success…"
-        method == WifiJoinMethod.SHIZUKU -> "Shizuku accepted the switch; waiting for Android to confirm it…"
+        takingLonger -> "Android is still switching Wi-Fi. EasierSpot will keep watching for the shared network…"
+        method == WifiJoinMethod.SHIZUKU -> "Shizuku requested the switch; waiting for Android to join the shared Wi-Fi…"
         else -> "Waiting for Android to select the EasierSpot network suggestion…"
     }
     is ClientConnectionState.Connected -> "Connected to $label" to (serverNotice ?: buildString {
         append(ssid)
-        append(
-            when (internet) {
-                InternetStatus.READY -> " · Internet ready"
-                InternetStatus.NOT_CONFIRMED -> " · Internet not confirmed"
-            }
-        )
         if (activeClientCount > 1) append(" · $activeClientCount clients sharing")
         append(" · Tap Disconnect when finished")
     })
