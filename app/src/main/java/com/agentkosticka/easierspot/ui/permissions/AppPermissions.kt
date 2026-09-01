@@ -14,18 +14,18 @@ object AppPermissions {
             add(Manifest.permission.BLUETOOTH_SCAN)
             add(Manifest.permission.BLUETOOTH_CONNECT)
             add(Manifest.permission.BLUETOOTH_ADVERTISE)
+            // Connected-network SSIDs are location-sensitive even on Android 13+.
+            // Request coarse and fine together so Android can present its precision choice;
+            // FINE is required below because approximate access still redacts the SSID.
+            add(Manifest.permission.ACCESS_COARSE_LOCATION)
+            add(Manifest.permission.ACCESS_FINE_LOCATION)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 add(Manifest.permission.NEARBY_WIFI_DEVICES)
-            } else {
-                add(Manifest.permission.ACCESS_FINE_LOCATION)
             }
         }
 
     val optionalRuntimePermissions: List<String>
         get() = buildList {
-            if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.S_V2) {
-                add(Manifest.permission.ACCESS_COARSE_LOCATION)
-            }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 add(Manifest.permission.POST_NOTIFICATIONS)
             }

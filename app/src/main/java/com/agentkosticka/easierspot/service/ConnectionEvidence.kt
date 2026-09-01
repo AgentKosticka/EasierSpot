@@ -28,19 +28,43 @@ sealed interface ConnectionVerdict {
 object ConnectionEvidenceReducer {
     fun reduce(evidence: ConnectionEvidence): ConnectionVerdict {
         val network = evidence.network ?: return ConnectionVerdict.WaitingForWifi
-        val ssidMatches = evidence.observedSsid == evidence.expectedSsid ||
-            (evidence.observedSsid == null &&
-                (evidence.privilegedSsidMatch || evidence.networkOwnedByApp))
         val ownershipMatches = evidence.suggestionOwned || evidence.privilegedSsidMatch
-        if (!ssidMatches || !ownershipMatches || !evidence.hasAssignedAddress) {
+        if (!WifiIdentityEvidencePolicy.canProbeCandidate(evidence) ||
+            !ownershipMatches ||
+            !evidence.hasAssignedAddress
+        ) {
             return ConnectionVerdict.WaitingForWifi
         }
         if (!evidence.authenticatedAck && !evidence.authenticatedGattFallback) {
             val gateway = evidence.dhcpServer ?: return ConnectionVerdict.WaitingForWifi
             return ConnectionVerdict.WaitingForPhone(network, gateway)
         }
+        // A GATT acknowledgement proves the paired phone is alive, but it does not prove that
+        // this redacted Wi-Fi Network belongs to it. Only the keyed UDP response from this
+        // network's gateway can safely replace explicit SSID/owner evidence.
+        if (!WifiIdentityEvidencePolicy.canAcceptCandidate(evidence)) {
+            return ConnectionVerdict.WaitingForWifi
+        }
         return ConnectionVerdict.Connected(
             if (evidence.internetValidated) InternetStatus.READY else InternetStatus.NOT_CONFIRMED
         )
     }
+}
+
+/** Keeps redacted Wi-Fi metadata useful without weakening connection authentication. */
+object WifiIdentityEvidencePolicy {
+    fun hasExplicitIdentity(evidence: ConnectionEvidence): Boolean =
+        evidence.observedSsid == evidence.expectedSsid ||
+            evidence.privilegedSsidMatch ||
+            evidence.networkOwnedByApp
+
+    fun canProbeCandidate(evidence: ConnectionEvidence): Boolean =
+        hasExplicitIdentity(evidence) ||
+            (evidence.observedSsid == null && evidence.suggestionOwned)
+
+    fun canAcceptCandidate(evidence: ConnectionEvidence): Boolean =
+        hasExplicitIdentity(evidence) ||
+            (evidence.observedSsid == null &&
+                evidence.suggestionOwned &&
+                evidence.authenticatedAck)
 }

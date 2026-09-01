@@ -30,6 +30,7 @@ import androidx.core.content.edit
 import com.agentkosticka.easierspot.R
 import com.agentkosticka.easierspot.ble.BleConstants
 import com.agentkosticka.easierspot.ble.BleSessionCrypto
+import com.agentkosticka.easierspot.ble.ServerStatusMessage
 import com.agentkosticka.easierspot.ble.client.BackgroundBleScanner
 import com.agentkosticka.easierspot.ble.client.BleDiscoveryRegistrar
 import com.agentkosticka.easierspot.ble.client.BleDistressAdvertiser
@@ -124,6 +125,12 @@ class BleClientService : Service() {
             connectTrusted(context, server.deviceId)
         }
 
+        fun disconnect(context: Context) {
+            context.startService(
+                Intent(context, BleClientService::class.java).setAction(ACTION_DISCONNECT)
+            )
+        }
+
         fun stop(context: Context) {
             AppPreferences.setBackgroundDiscoveryEnabled(context, false)
             BleDiscoveryRegistrar.stop(context)
@@ -172,6 +179,8 @@ class BleClientService : Service() {
     private var joinStartedAt = 0L
     private var suggestionOwnedEvidence = false
     private var privilegedSsidMatch = false
+    private var serverActiveClientCount = 1
+    private var serverNotice: String? = null
     private var evidence: ConnectionEvidence? = null
     private var udpClient: UdpControlClient? = null
     private var udpHelloJob: Job? = null
@@ -192,7 +201,15 @@ class BleClientService : Service() {
             }
             val ownedByApp = capabilities.ownerUid == applicationInfo.uid ||
                 suggestionOwnerPackage(wifiInfo) == packageName
-            if (ssid != expected && !ownedByApp) return
+            // Fine location normally exposes the SSID. If the user has disabled the system
+            // Location toggle, Android can still redact it. Admit only an in-flight,
+            // app-suggested unknown-SSID candidate so the authenticated UDP challenge can
+            // identify the phone cryptographically. A redacted network can never be accepted
+            // from the weaker GATT fallback alone (see ConnectionEvidenceReducer).
+            val authenticatedCandidate = ssid == null &&
+                suggestionOwnedEvidence &&
+                joinStartedAt > 0L
+            if (ssid != expected && !ownedByApp && !authenticatedCandidate) return
             targetNetwork = network
             if (ssid == expected) {
                 diagnostics.event("wifi_associated ssid=$expected")
@@ -497,7 +514,6 @@ class BleClientService : Service() {
         joinStartedAt = SystemClock.elapsedRealtime()
         wifiJob = scope.launch {
             val manager = HotspotManager(applicationContext)
-            manager.enableClientWifi()
             diagnostics.event("fast_path wake_transmitted suggestion_ready=true")
             val preference = AppPreferences.getWifiConnectionMode(applicationContext)
             WifiSuggestionInstaller.ensureAutojoin(
@@ -505,6 +521,7 @@ class BleClientService : Service() {
                 target,
                 preference != AppPreferences.WifiConnectionMode.SHIZUKU_FORCE
             )
+            if (!ensureClientWifiEnabled(manager, target.ssid)) return@launch
             if (preference != AppPreferences.WifiConnectionMode.SHIZUKU_FORCE) {
                 manager.prepareSuggestionSelection(target.ssid)
             }
@@ -664,6 +681,9 @@ class BleClientService : Service() {
         }
         scope.launch { gattClient.receivedCredentials.filterNotNull().collect(::onCredentials) }
         scope.launch {
+            gattClient.serverStatus.filterNotNull().collect(::onServerStatus)
+        }
+        scope.launch {
             gattClient.connectionState.collect { state ->
                 if ((state == GattClient.ConnectionState.ERROR ||
                         state == GattClient.ConnectionState.DISCONNECTED) &&
@@ -671,6 +691,43 @@ class BleClientService : Service() {
                 ) scheduleControlReconnect()
             }
         }
+    }
+
+    private fun onServerStatus(status: ServerStatusMessage) {
+        serverActiveClientCount = status.activeClientCount.coerceAtLeast(1)
+        when (status.type) {
+            ServerStatusMessage.Type.AVAILABLE,
+            ServerStatusMessage.Type.SHARING -> {
+                serverNotice = null
+                if (connected) refreshConnectedState()
+            }
+            ServerStatusMessage.Type.PRIVILEGED_CONTROL_LOST -> {
+                serverNotice = "Connected · The sharing phone lost Shizuku control; this connection remains active"
+                if (connected) refreshConnectedState()
+            }
+            ServerStatusMessage.Type.SERVER_STOPPING -> endSession(
+                "$targetName stopped sharing",
+                "The sharing phone turned EasierSpot off. Nearby discovery is still ready."
+            )
+            ServerStatusMessage.Type.HOTSPOT_STOPPED -> endSession(
+                "$targetName turned off its hotspot",
+                "The sharing phone stopped Wi-Fi sharing. Nearby discovery is still ready."
+            )
+            ServerStatusMessage.Type.CLIENT_DISCONNECTED -> endSession(
+                "Disconnected by $targetName",
+                "The sharing phone ended this device's connection."
+            )
+        }
+    }
+
+    private fun refreshConnectedState() {
+        val current = _connectionState.value as? ClientConnectionState.Connected ?: return
+        startForegroundState(
+            current.copy(
+                activeClientCount = serverActiveClientCount,
+                serverNotice = serverNotice
+            )
+        )
     }
 
     private fun scheduleHotspotProgressTimeout() {
@@ -746,8 +803,10 @@ class BleClientService : Service() {
             diagnostics.event("control_fallback=authenticated_gatt")
             startForegroundState(
                 ClientConnectionState.Connected(
-                    received.ssid,
-                    evidence?.let {
+                    serverToken = targetToken.orEmpty(),
+                    label = targetName,
+                    ssid = received.ssid,
+                    internet = evidence?.let {
                         if (it.internetValidated) InternetStatus.READY else InternetStatus.NOT_CONFIRMED
                     } ?: InternetStatus.NOT_CONFIRMED
                 )
@@ -773,7 +832,6 @@ class BleClientService : Service() {
                 completeWifiConnection(target.ssid, "initial_status_check")
                 return@launch
             }
-            manager.enableClientWifi()
             val preference = AppPreferences.getWifiConnectionMode(applicationContext)
             val preferSuggestion = preference == AppPreferences.WifiConnectionMode.SUGGESTION ||
                 (preference == AppPreferences.WifiConnectionMode.AUTO &&
@@ -817,6 +875,8 @@ class BleClientService : Service() {
                 )
                 return@launch
             }
+
+            if (!ensureClientWifiEnabled(manager, target.ssid)) return@launch
 
             if (!manager.isShizukuAvailable()) {
                 when (WifiSuggestionInstaller.approvalStatus(applicationContext)) {
@@ -890,6 +950,34 @@ class BleClientService : Service() {
                 fail("Could not join ${target.ssid}", "Both automatic connection methods finished without a confirmed Wi-Fi connection")
             }
         }
+    }
+
+    private suspend fun ensureClientWifiEnabled(
+        manager: HotspotManager,
+        targetSsid: String
+    ): Boolean {
+        if (manager.isClientWifiEnabled()) return true
+        if (!manager.isShizukuAvailable()) {
+            fail(
+                "Turn on Wi-Fi to continue",
+                "Open the Wi-Fi panel, turn Wi-Fi on, then select $targetSsid under EasierSpot suggestions.",
+                ClientRecoveryAction.WIFI_SETTINGS
+            )
+            return false
+        }
+        diagnostics.event("wifi_disabled force_enabling_with_shizuku=true")
+        val result = manager.enableClientWifi()
+        val deadline = SystemClock.elapsedRealtime() + 6_000L
+        while (!manager.isClientWifiEnabled() && SystemClock.elapsedRealtime() < deadline) {
+            delay(150L)
+        }
+        if (manager.isClientWifiEnabled()) return true
+        fail(
+            "Wi-Fi could not be enabled",
+            "Shizuku returned ${if (result.accepted) "success" else "an error"}, but Android kept Wi-Fi off. Open the Wi-Fi panel to continue.",
+            ClientRecoveryAction.WIFI_SETTINGS
+        )
+        return false
     }
 
     private fun verifyConnected(ssid: String): Boolean? {
@@ -968,7 +1056,7 @@ class BleClientService : Service() {
             if (acknowledged) {
                 diagnostics.event("authenticated_udp_ack")
                 updateEvidence { copy(authenticatedAck = true) }
-                gattClient.disconnect()
+                gattClient.requestLowPowerConnection()
             } else {
                 diagnostics.event("udp_ack_unavailable gatt_fallback=true")
                 requestGattControlFallback()
@@ -1028,7 +1116,16 @@ class BleClientService : Service() {
             if (!controlOverGatt) gattClient.disconnect()
             startHeartbeat()
         }
-        startForegroundState(ClientConnectionState.Connected(ssid, internet))
+        startForegroundState(
+            ClientConnectionState.Connected(
+                serverToken = targetToken.orEmpty(),
+                label = targetName,
+                ssid = ssid,
+                internet = internet,
+                activeClientCount = serverActiveClientCount,
+                serverNotice = serverNotice
+            )
+        )
     }
 
     private fun startHeartbeat() {
@@ -1066,7 +1163,16 @@ class BleClientService : Service() {
                 if (gattClient.connectionState.value == GattClient.ConnectionState.CONNECTED) return@launch
             }
             credentials?.ssid?.let {
-                startForegroundState(ClientConnectionState.Connected(it, controlAvailable = false))
+                startForegroundState(
+                    ClientConnectionState.Connected(
+                        serverToken = targetToken.orEmpty(),
+                        label = targetName,
+                        ssid = it,
+                        controlAvailable = false,
+                        activeClientCount = serverActiveClientCount,
+                        serverNotice = "Connected · Live server updates are temporarily unavailable"
+                    )
+                )
             }
         }
     }
@@ -1095,10 +1201,10 @@ class BleClientService : Service() {
     }
 
     @Synchronized
-    private fun endSession(reason: String?) {
+    private fun endSession(reason: String?, detail: String = "EasierSpot returned to nearby discovery") {
         if (ending) return
         ending = true
-        if (reason != null) startForegroundState(ClientConnectionState.Failed(reason, "EasierSpot returned to nearby discovery"))
+        if (reason != null) startForegroundState(ClientConnectionState.Disconnected(reason, detail))
         gattClient.sendGoodbye()
         gattClient.distressPayload()?.let(distressAdvertiser::scream)
         sessionGeneration++
@@ -1133,6 +1239,7 @@ class BleClientService : Service() {
         udpMisses = 0
         controlOverGatt = false
         suggestionOwnedEvidence = false; privilegedSsidMatch = false; evidence = null
+        serverActiveClientCount = 1; serverNotice = null
         if (!keepForeground) _connectionState.value = ClientConnectionState.Idle
     }
 
@@ -1158,12 +1265,13 @@ class BleClientService : Service() {
                 ClientRecoveryAction.WIFI_SETTINGS -> PendingIntent.getActivity(
                     this,
                     1,
-                    Intent(Settings.ACTION_WIFI_SETTINGS),
+                    Intent(Settings.Panel.ACTION_WIFI),
                     PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
                 )
                 ClientRecoveryAction.SHIZUKU,
                 ClientRecoveryAction.PERMISSIONS -> open
             }
+            is ClientConnectionState.Disconnected -> open
             else -> PendingIntent.getService(
                 this,
                 1,
@@ -1178,6 +1286,7 @@ class BleClientService : Service() {
                 ClientRecoveryAction.SHIZUKU -> "Fix Shizuku"
                 ClientRecoveryAction.PERMISSIONS -> "Fix permissions"
             }
+            is ClientConnectionState.Disconnected -> "Done"
             else -> "Disconnect"
         }
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
@@ -1186,7 +1295,7 @@ class BleClientService : Service() {
             .setContentText(text)
             .setStyle(NotificationCompat.BigTextStyle().bigText(text))
             .setContentIntent(open)
-            .setOngoing(state !is ClientConnectionState.Failed)
+            .setOngoing(state !is ClientConnectionState.Failed && state !is ClientConnectionState.Disconnected)
             .setOnlyAlertOnce(true)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)

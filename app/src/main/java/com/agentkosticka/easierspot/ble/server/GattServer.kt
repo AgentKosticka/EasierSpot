@@ -19,6 +19,7 @@ import com.agentkosticka.easierspot.ble.BleConstants
 import com.agentkosticka.easierspot.ble.BleAuthFraming
 import com.agentkosticka.easierspot.ble.BleDiscoveryProtocol
 import com.agentkosticka.easierspot.ble.BleSessionCrypto
+import com.agentkosticka.easierspot.ble.ServerStatusMessage
 import com.agentkosticka.easierspot.data.model.HotspotCredentials
 import com.agentkosticka.easierspot.util.LogUtils
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -57,7 +58,9 @@ class GattServer(private val context: Context, private val deviceId: String) {
     private val clientStableIds = ConcurrentHashMap<String, String>()
     private val approvalNotificationEnabledClients = mutableSetOf<String>()
     private val hotspotNotificationEnabledClients = mutableSetOf<String>()
+    private val serverStatusNotificationEnabledClients = mutableSetOf<String>()
     private var hotspotCredentials: HotspotCredentials? = null
+    private var serverStatus = ServerStatusMessage(ServerStatusMessage.Type.AVAILABLE, 0)
     private var newClientCallback: ((String, String?) -> Unit)? = null
     private var clientConnectionStateCallback: ((String, Boolean, String?) -> Unit)? = null
     private var sessionControlCallback: ((String, Byte) -> Unit)? = null
@@ -91,6 +94,8 @@ class GattServer(private val context: Context, private val deviceId: String) {
     }
 
     fun stableIdForAddress(clientAddress: String): String? = clientStableIds[clientAddress]
+    fun stableAddress(stableId: String): String? =
+        clientStableIds.entries.firstOrNull { it.value == stableId }?.key
     fun clientPublicKeyForAddress(clientAddress: String): ByteArray? =
         clientPublicKeys[clientAddress]?.copyOf()
 
@@ -180,7 +185,9 @@ class GattServer(private val context: Context, private val deviceId: String) {
         clientStatus.clear()
         approvalNotificationEnabledClients.clear()
         hotspotNotificationEnabledClients.clear()
+        serverStatusNotificationEnabledClients.clear()
         hotspotCredentials = null
+        serverStatus = ServerStatusMessage(ServerStatusMessage.Type.AVAILABLE, 0)
         sessionKeys.clear()
         pairingCodes.clear()
         lastControlCounters.clear()
@@ -234,6 +241,37 @@ class GattServer(private val context: Context, private val deviceId: String) {
         _connectedClients.value = updatedList
     }
 
+    fun updateServerStatus(status: ServerStatusMessage) {
+        serverStatus = status
+        clientStableIds.keys.forEach { address -> sendServerStatus(address, status) }
+    }
+
+    fun sendServerStatus(clientAddress: String, status: ServerStatusMessage) {
+        val payload = encryptedServerStatus(clientAddress, status) ?: return
+        notifyClient(clientAddress, BleConstants.CHAR_SERVER_STATUS, payload)
+    }
+
+    fun disconnectAuthenticatedClient(stableId: String) {
+        val address = clientStableIds.entries.firstOrNull { it.value == stableId }?.key ?: return
+        val device = runCatching { bluetoothAdapter?.getRemoteDevice(address) }.getOrNull() ?: return
+        runCatching { gattServer?.cancelConnection(device) }
+            .onFailure { LogUtils.w(TAG, "Could not disconnect authenticated client", it) }
+    }
+
+    private fun encryptedServerStatus(
+        clientAddress: String,
+        status: ServerStatusMessage
+    ): ByteArray? {
+        val key = sessionKeys[clientAddress] ?: return null
+        val hello = serverHello ?: return null
+        val plaintext = status.encode()
+        return try {
+            BleSessionCrypto.encrypt(key, plaintext, hello.nonce)
+        } finally {
+            plaintext.fill(0)
+        }
+    }
+
     private fun notifyClient(clientAddress: String, characteristicUuid: java.util.UUID, payload: ByteArray) {
         if (characteristicUuid == BleConstants.CHAR_APPROVAL_STATUS && clientAddress !in approvalNotificationEnabledClients) {
             LogUtils.d(TAG, "Skipping approval notification for $clientAddress until CCCD is enabled")
@@ -241,6 +279,12 @@ class GattServer(private val context: Context, private val deviceId: String) {
         }
         if (characteristicUuid == BleConstants.CHAR_HOTSPOT_DATA && clientAddress !in hotspotNotificationEnabledClients) {
             LogUtils.d(TAG, "Skipping hotspot notification for $clientAddress until CCCD is enabled")
+            return
+        }
+        if (characteristicUuid == BleConstants.CHAR_SERVER_STATUS &&
+            clientAddress !in serverStatusNotificationEnabledClients
+        ) {
+            LogUtils.d(TAG, "Skipping server status indication until CCCD is enabled")
             return
         }
         indicationQueue.addLast(PendingIndication(clientAddress, characteristicUuid, payload.copyOf()))
@@ -354,6 +398,19 @@ class GattServer(private val context: Context, private val deviceId: String) {
         )
         service.addCharacteristic(sessionControlChar)
 
+        val serverStatusChar = BluetoothGattCharacteristic(
+            BleConstants.CHAR_SERVER_STATUS,
+            BluetoothGattCharacteristic.PROPERTY_INDICATE or BluetoothGattCharacteristic.PROPERTY_READ,
+            BluetoothGattCharacteristic.PERMISSION_READ
+        )
+        serverStatusChar.addDescriptor(
+            BluetoothGattDescriptor(
+                BleConstants.CLIENT_CONFIG_DESCRIPTOR_UUID,
+                BluetoothGattDescriptor.PERMISSION_READ or BluetoothGattDescriptor.PERMISSION_WRITE
+            )
+        )
+        service.addCharacteristic(serverStatusChar)
+
         return service
     }
 
@@ -432,6 +489,7 @@ class GattServer(private val context: Context, private val deviceId: String) {
                     }
                     approvalNotificationEnabledClients.remove(device.address)
                     hotspotNotificationEnabledClients.remove(device.address)
+                    serverStatusNotificationEnabledClients.remove(device.address)
                     disconnectClient(device.address)
                 }
             }
@@ -521,6 +579,27 @@ class GattServer(private val context: Context, private val deviceId: String) {
                         BluetoothGatt.GATT_SUCCESS,
                         offset,
                         payload
+                    )
+                }
+                BleConstants.CHAR_SERVER_STATUS -> {
+                    val fullPayload = encryptedServerStatus(device.address, serverStatus)
+                        ?: byteArrayOf()
+                    if (offset > fullPayload.size) {
+                        gattServer?.sendResponse(
+                            device,
+                            requestId,
+                            BluetoothGatt.GATT_INVALID_OFFSET,
+                            offset,
+                            null
+                        )
+                        return
+                    }
+                    gattServer?.sendResponse(
+                        device,
+                        requestId,
+                        BluetoothGatt.GATT_SUCCESS,
+                        offset,
+                        fullPayload.copyOfRange(offset, fullPayload.size)
                     )
                 }
                 else -> {
@@ -683,6 +762,14 @@ class GattServer(private val context: Context, private val deviceId: String) {
                         }
                     } else {
                         hotspotNotificationEnabledClients.remove(device.address)
+                    }
+                }
+                BleConstants.CHAR_SERVER_STATUS -> {
+                    if (isEnabled) {
+                        serverStatusNotificationEnabledClients.add(device.address)
+                        sendServerStatus(device.address, serverStatus)
+                    } else {
+                        serverStatusNotificationEnabledClients.remove(device.address)
                     }
                 }
             }

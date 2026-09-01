@@ -32,6 +32,7 @@ import com.agentkosticka.easierspot.ble.server.WakeBoostLimiter
 import com.agentkosticka.easierspot.ble.server.WakePeerStore
 import com.agentkosticka.easierspot.ble.BleConstants
 import com.agentkosticka.easierspot.ble.BleDiscoveryProtocol
+import com.agentkosticka.easierspot.ble.ServerStatusMessage
 import com.agentkosticka.easierspot.data.db.AppDatabase
 import com.agentkosticka.easierspot.data.model.RememberedServer
 import com.agentkosticka.easierspot.hotspot.HotspotManager
@@ -58,6 +59,12 @@ import java.util.concurrent.ConcurrentHashMap
 import rikka.shizuku.Shizuku
 
 class BleHotspotService : Service() {
+    data class ConnectedClientSummary(
+        val stableId: String,
+        val label: String,
+        val lastSeenAt: Long
+    )
+
     enum class ServerState {
         STOPPED,
         STARTING,
@@ -86,11 +93,13 @@ class BleHotspotService : Service() {
         const val ACTION_STOP_SERVER = "com.agentkosticka.easierspot.STOP_SERVER"
         const val ACTION_APPROVE_CLIENT = "com.agentkosticka.easierspot.APPROVE_CLIENT"
         const val ACTION_DENY_CLIENT = "com.agentkosticka.easierspot.DENY_CLIENT"
+        const val ACTION_DISCONNECT_CLIENT = "com.agentkosticka.easierspot.DISCONNECT_CLIENT"
         const val ACTION_SHOW_APPROVAL = "com.agentkosticka.easierspot.SHOW_APPROVAL"
         const val EXTRA_DEVICE_ID = "device_id"
         const val EXTRA_CLIENT_ADDRESS = "client_address"
         const val EXTRA_CLIENT_DEVICE_ID = "client_device_id"
         const val EXTRA_CLIENT_NAME = "client_name"
+        const val EXTRA_CLIENT_STABLE_ID = "client_stable_id"
         const val EXTRA_APPROVAL_IS_REMEMBERED = "approval_is_remembered"
         const val EXTRA_APPROVAL_DISPLAY_ID = "approval_display_id"
         const val EXTRA_APPROVAL_DISPLAY_NAME = "approval_display_name"
@@ -102,6 +111,8 @@ class BleHotspotService : Service() {
 
         private val _serverState = MutableStateFlow(ServerState.STOPPED)
         val serverState: StateFlow<ServerState> = _serverState.asStateFlow()
+        private val _connectedClients = MutableStateFlow<List<ConnectedClientSummary>>(emptyList())
+        val connectedClients: StateFlow<List<ConnectedClientSummary>> = _connectedClients.asStateFlow()
         val isServerRunning: Boolean
             get() = _serverState.value != ServerState.STOPPED
         private const val STATE_PREFS = "server_service_state"
@@ -201,6 +212,12 @@ class BleHotspotService : Service() {
                     // stop advertising and accepting wake requests until privileged control returns.
                     bleAdvertiser?.stopAdvertising()
                     wakeScanner?.stop()
+                    gattServer?.updateServerStatus(
+                        ServerStatusMessage(
+                            ServerStatusMessage.Type.PRIVILEGED_CONTROL_LOST,
+                            activeClients.size
+                        )
+                    )
                     bleStartInFlight = false
                     if (!active) stopBleTransport()
                     _serverState.value = if (active) ServerState.DEGRADED else ServerState.NEEDS_SHIZUKU
@@ -228,11 +245,18 @@ class BleHotspotService : Service() {
                 ACTION_WIFI_AP_STATE_CHANGED -> {
                     val state = intent.getIntExtra(EXTRA_WIFI_AP_STATE, -1)
                     if (state == WIFI_AP_STATE_DISABLING || state == WIFI_AP_STATE_DISABLED) {
+                        gattServer?.updateServerStatus(
+                            ServerStatusMessage(
+                                ServerStatusMessage.Type.HOTSPOT_STOPPED,
+                                activeClients.size
+                            )
+                        )
                         if (hotspotStartedByApp) {
                             LogUtils.i(TAG, "Hotspot was switched off outside EasierSpot; ownership released")
                             setHotspotOwned(false)
                         }
                         activeClients.clear()
+                        publishConnectedClients()
                         udpControlServer.stop()
                         bleAdvertiser?.setHotspotActive(false)
                         if (desiredRunning() && !pausedForAudio) {
@@ -296,6 +320,9 @@ class BleHotspotService : Service() {
                 ACTION_STOP_SERVER -> {
                     persistServerState(false)
                     stopServerAndSelf()
+                }
+                ACTION_DISCONNECT_CLIENT -> {
+                    intent?.getStringExtra(EXTRA_CLIENT_STABLE_ID)?.let(::disconnectActiveClient)
                 }
                 ACTION_APPROVE_CLIENT -> {
                     dismissApprovalNotification()
@@ -447,6 +474,13 @@ class BleHotspotService : Service() {
                                     advertiseResult.onSuccess {
                                         bleRetryAttempt = 0
                                         _serverState.value = ServerState.ADVERTISING
+                                        advertiser.setHotspotActive(false, revision)
+                                        gattServer?.updateServerStatus(
+                                            ServerStatusMessage(
+                                                ServerStatusMessage.Type.AVAILABLE,
+                                                activeClients.size
+                                            )
+                                        )
                                         startWakeRequestReceiver()
                                         updateServiceNotification()
                                     }.onFailure { error ->
@@ -510,6 +544,7 @@ class BleHotspotService : Service() {
         wakeLeaseJob = null
         udpControlServer.stop()
         activeClients.clear()
+        _connectedClients.value = emptyList()
         _serverState.value = ServerState.STOPPED
         dismissApprovalNotification()
     }
@@ -788,6 +823,7 @@ class BleHotspotService : Service() {
             _serverState.value = ServerState.SHARING
             stableId?.let { authenticatedId ->
                 activeClients[authenticatedId] = ActiveClient(System.currentTimeMillis())
+                publishConnectedClients()
                 startClientLivenessTracking()
             }
             bleAdvertiser?.setHotspotActive(
@@ -959,8 +995,18 @@ class BleHotspotService : Service() {
         .getBoolean(KEY_RUNNING, false)
 
     private fun stopServerAndSelf() {
-        stopBleServer()
         serviceScope.launch {
+            withContext(Dispatchers.Main) {
+                gattServer?.updateServerStatus(
+                    ServerStatusMessage(
+                        ServerStatusMessage.Type.SERVER_STOPPING,
+                        activeClients.size
+                    )
+                )
+            }
+            // Give the confirmed BLE indication a short window before closing GATT.
+            delay(500L)
+            withContext(Dispatchers.Main) { stopBleServer() }
             stopOwnedHotspot()
             withContext(Dispatchers.Main) {
                 ServiceCompat.stopForeground(this@BleHotspotService, ServiceCompat.STOP_FOREGROUND_REMOVE)
@@ -1108,6 +1154,7 @@ class BleHotspotService : Service() {
         when (type) {
             BleConstants.UDP_HELLO, BleConstants.UDP_HEARTBEAT -> {
                 activeClients[fingerprint] = ActiveClient(System.currentTimeMillis())
+                publishConnectedClients()
                 wakeLeaseJob?.cancel()
                 hotspotShutdownJob?.cancel()
                 startClientLivenessTracking()
@@ -1119,7 +1166,58 @@ class BleHotspotService : Service() {
     private fun removeActiveClient(stableId: String, reason: String) {
         if (activeClients.remove(stableId) == null) return
         LogUtils.i(TAG, "Client $stableId inactive: $reason")
+        publishConnectedClients()
         if (activeClients.isEmpty()) scheduleNoClientShutdown()
+    }
+
+    private fun disconnectActiveClient(stableId: String) {
+        if (stableId !in activeClients) return
+        val server = gattServer ?: run {
+            removeActiveClient(stableId, "disconnected by sharing phone")
+            return
+        }
+        val address = server.stableAddress(stableId)
+        if (address != null) {
+            server.sendServerStatus(
+                address,
+                ServerStatusMessage(
+                    ServerStatusMessage.Type.CLIENT_DISCONNECTED,
+                    (activeClients.size - 1).coerceAtLeast(0)
+                )
+            )
+        }
+        serviceScope.launch {
+            delay(350L)
+            withContext(Dispatchers.Main) { server.disconnectAuthenticatedClient(stableId) }
+            removeActiveClient(stableId, "disconnected by sharing phone")
+        }
+    }
+
+    private fun publishConnectedClients() {
+        val snapshot = activeClients.mapValues { it.value.lastHeartbeatAt }
+        val statusType = if (snapshot.isEmpty()) {
+            ServerStatusMessage.Type.AVAILABLE
+        } else {
+            ServerStatusMessage.Type.SHARING
+        }
+        gattServer?.updateServerStatus(ServerStatusMessage(statusType, snapshot.size))
+        serviceScope.launch {
+            val dao = database.rememberedServerDao()
+            val summaries = snapshot.map { (stableId, seenAt) ->
+                val remembered = dao.getServerById(stableId)
+                ConnectedClientSummary(
+                    stableId = stableId,
+                    label = remembered?.nickname?.takeIf { it.isNotBlank() }
+                        ?: remembered?.deviceName?.takeIf {
+                            it.isNotBlank() && !it.equals("Unknown Device", ignoreCase = true)
+                        }
+                        ?: normalizeIdentityForDisplay(stableId),
+                    lastSeenAt = seenAt
+                )
+            }.sortedBy { it.label.lowercase() }
+            _connectedClients.value = summaries
+            updateServiceNotification()
+        }
     }
 
     private fun scheduleNoClientShutdown() {

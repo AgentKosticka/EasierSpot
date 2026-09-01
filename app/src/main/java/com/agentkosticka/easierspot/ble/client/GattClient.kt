@@ -19,6 +19,7 @@ import com.agentkosticka.easierspot.ble.BleConstants
 import com.agentkosticka.easierspot.ble.BleAuthFraming
 import com.agentkosticka.easierspot.ble.BleDiscoveryProtocol
 import com.agentkosticka.easierspot.ble.BleSessionCrypto
+import com.agentkosticka.easierspot.ble.ServerStatusMessage
 import com.agentkosticka.easierspot.data.model.HotspotCredentials
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -49,6 +50,7 @@ class GattClient(private val context: Context) {
 
     // CCCD Cccd
     private var pendingHotspotCccdWrite = false
+    private var pendingServerStatusCccdWrite = false
     private var pendingHotspotRead = false
     private var pendingApprovalRead = false
     private var approvalPollJob: Job? = null
@@ -87,6 +89,8 @@ class GattClient(private val context: Context) {
     val serverDeviceId: StateFlow<String?> = _serverDeviceId.asStateFlow()
     private val _pairingCode = MutableStateFlow<String?>(null)
     val pairingCode: StateFlow<String?> = _pairingCode.asStateFlow()
+    private val _serverStatus = MutableStateFlow<ServerStatusMessage?>(null)
+    val serverStatus: StateFlow<ServerStatusMessage?> = _serverStatus.asStateFlow()
 
     enum class ConnectionState {
         DISCONNECTED,
@@ -134,11 +138,13 @@ class GattClient(private val context: Context) {
         pendingDeviceIdRead = false
         pendingClientIdWrite = false
         pendingHotspotCccdWrite = false
+        pendingServerStatusCccdWrite = false
         pendingHotspotRead = false
         pendingApprovalRead = false
         serviceDiscoveryStarted = false
         _serverDeviceId.value = null
         _pairingCode.value = null
+        _serverStatus.value = null
         serverHello = null
         sessionKey = null
         this.expectedServerFingerprint = expectedServerFingerprint
@@ -165,6 +171,7 @@ class GattClient(private val context: Context) {
         pendingDeviceIdRead = false
         pendingClientIdWrite = false
         pendingHotspotCccdWrite = false
+        pendingServerStatusCccdWrite = false
         pendingHotspotRead = false
         pendingApprovalRead = false
         serviceDiscoveryStarted = false
@@ -178,6 +185,7 @@ class GattClient(private val context: Context) {
         pendingAuthBytes?.fill(0)
         pendingAuthBytes = null
         _pairingCode.value = null
+        _serverStatus.value = null
     }
 
     fun requestLowPowerConnection(): Boolean =
@@ -560,6 +568,59 @@ class GattClient(private val context: Context) {
         }
     }
 
+    private fun enableServerStatusChannel() {
+        if (pendingServerStatusCccdWrite) return
+        val currentGatt = gatt ?: return
+        val characteristic = currentGatt.getService(BleConstants.SERVICE_UUID)
+            ?.getCharacteristic(BleConstants.CHAR_SERVER_STATUS) ?: run {
+            _gattError.value = "Server status characteristic missing"
+            return
+        }
+        if (!currentGatt.setCharacteristicNotification(characteristic, true)) {
+            readServerStatusCharacteristic()
+            return
+        }
+        val descriptor = characteristic.getDescriptor(BleConstants.CLIENT_CONFIG_DESCRIPTOR_UUID)
+            ?: run {
+                readServerStatusCharacteristic()
+                return
+            }
+        val accepted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            currentGatt.writeDescriptor(
+                descriptor,
+                BluetoothGattDescriptor.ENABLE_INDICATION_VALUE
+            ) == BluetoothStatusCodes.SUCCESS
+        } else {
+            @Suppress("DEPRECATION")
+            descriptor.value = BluetoothGattDescriptor.ENABLE_INDICATION_VALUE
+            @Suppress("DEPRECATION")
+            currentGatt.writeDescriptor(descriptor)
+        }
+        if (accepted) pendingServerStatusCccdWrite = true else readServerStatusCharacteristic()
+    }
+
+    private fun readServerStatusCharacteristic() {
+        val characteristic = gatt?.getService(BleConstants.SERVICE_UUID)
+            ?.getCharacteristic(BleConstants.CHAR_SERVER_STATUS) ?: return
+        gatt?.readCharacteristic(characteristic)
+    }
+
+    private fun decodeServerStatus(envelope: ByteArray): ServerStatusMessage? {
+        val key = sessionKey ?: return null
+        val hello = serverHello ?: return null
+        val plaintext = runCatching {
+            BleSessionCrypto.decrypt(key, envelope, hello.nonce)
+        }.getOrElse {
+            _gattError.value = "Server status authentication failed"
+            return null
+        }
+        return try {
+            ServerStatusMessage.decode(plaintext)
+        } finally {
+            plaintext.fill(0)
+        }
+    }
+
     private inner class GattCallbackImpl : BluetoothGattCallback() {
         override fun onConnectionStateChange(gatt: BluetoothGatt, status: Int, newState: Int) {
             super.onConnectionStateChange(gatt, status, newState)
@@ -745,10 +806,14 @@ class GattClient(private val context: Context) {
                             _phase.value = GattPhase.Ready
                             _receivedCredentials.value = credentials
                             pendingHotspotRead = false
+                            enableServerStatusChannel()
                         }
                     } else {
                         Log.w(TAG, "Hotspot data read returned empty - credentials not ready yet")
                     }
+                }
+                BleConstants.CHAR_SERVER_STATUS -> {
+                    decodeServerStatus(value)?.let { _serverStatus.value = it }
                 }
             }
         }
@@ -788,9 +853,13 @@ class GattClient(private val context: Context) {
                         stopApprovalPolling()
                         _phase.value = GattPhase.Ready
                         _receivedCredentials.value = credentials
+                        enableServerStatusChannel()
                     } else {
                         Log.w(TAG, "Failed to decode hotspot data")
                     }
+                }
+                BleConstants.CHAR_SERVER_STATUS -> {
+                    decodeServerStatus(value)?.let { _serverStatus.value = it }
                 }
                 BleConstants.CHAR_APPROVAL_STATUS -> {
                     val status = value.firstOrNull()?.toInt() ?: -1
@@ -871,6 +940,10 @@ class GattClient(private val context: Context) {
                     Log.d(TAG, "CCCD setup complete, reading device ID")
                     readDeviceIdCharacteristic()
                 }
+            }
+            if (descriptor.characteristic.uuid == BleConstants.CHAR_SERVER_STATUS) {
+                pendingServerStatusCccdWrite = false
+                readServerStatusCharacteristic()
             }
         }
 

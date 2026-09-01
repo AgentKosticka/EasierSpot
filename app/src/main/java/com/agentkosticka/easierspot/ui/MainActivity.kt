@@ -11,6 +11,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.app.AlertDialog
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import com.agentkosticka.easierspot.R
@@ -45,6 +46,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var clientStatus: TextView
     private lateinit var setupHealth: TextView
     private lateinit var serverButton: android.widget.Button
+    private var connectedClients: List<BleHotspotService.ConnectedClientSummary> = emptyList()
     private val updateStateListener: (UpdateChecker.State) -> Unit = { state ->
         runOnUiThread { renderUpdateBanner(state) }
     }
@@ -102,6 +104,18 @@ class MainActivity : AppCompatActivity() {
         BleHotspotService.restoreIfEnabled(this)
         mainScope.launch {
             BleHotspotService.serverState.collect { renderServerState(it) }
+        }
+        mainScope.launch {
+            BleHotspotService.connectedClients.collect { clients ->
+                connectedClients = clients
+                if (clients.isNotEmpty()) {
+                    serverStatus.text = resources.getQuantityString(
+                        R.plurals.dashboard_server_connected_clients,
+                        clients.size,
+                        clients.size
+                    )
+                }
+            }
         }
         mainScope.launch {
             BleClientService.connectionState.collect { state ->
@@ -177,9 +191,22 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun stopSharing() {
-        startService(Intent(this, BleHotspotService::class.java).apply {
-            action = BleHotspotService.ACTION_STOP_SERVER
-        })
+        AlertDialog.Builder(this)
+            .setTitle(R.string.stop_sharing_confirm_title)
+            .setMessage(
+                if (connectedClients.isEmpty()) getString(R.string.stop_sharing_no_clients)
+                else getString(
+                    R.string.stop_sharing_with_clients,
+                    connectedClients.joinToString("\n") { "• ${it.label}" }
+                )
+            )
+            .setNegativeButton(android.R.string.cancel, null)
+            .setPositiveButton(R.string.stop_sharing) { _, _ ->
+                startService(Intent(this, BleHotspotService::class.java).apply {
+                    action = BleHotspotService.ACTION_STOP_SERVER
+                })
+            }
+            .show()
     }
 
     private fun renderServerState(state: BleHotspotService.ServerState) {

@@ -18,7 +18,9 @@ import android.widget.ImageButton
 import android.widget.ListView
 import android.widget.SimpleAdapter
 import android.widget.Toast
+import android.view.View
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
@@ -44,6 +46,9 @@ class ServerActivity : AppCompatActivity(), ApprovalDialog.ApprovalListener, Rem
     private val database by lazy { AppDatabase.getDatabase(this) }
     private val rememberedDeviceRows = mutableListOf<Map<String, String>>()
     private var rememberedAdapter: SimpleAdapter? = null
+    private val connectedDeviceRows = mutableListOf<Map<String, String>>()
+    private var connectedAdapter: SimpleAdapter? = null
+    private var connectedSnapshot: List<BleHotspotService.ConnectedClientSummary> = emptyList()
     private var approvalReceiverRegistered = false
     private var serviceBound = false
     private val serviceConnection = object : ServiceConnection {
@@ -94,6 +99,7 @@ class ServerActivity : AppCompatActivity(), ApprovalDialog.ApprovalListener, Rem
             val stopButton = findViewById<Button>(R.id.btn_stop_sharing)
             val settingsButton = findViewById<ImageButton>(R.id.btn_server_settings)
             val rememberedList = findViewById<ListView>(R.id.list_remembered_devices)
+            val connectedList = findViewById<ListView>(R.id.list_connected_clients)
 
             rememberedAdapter = SimpleAdapter(
                 this,
@@ -103,6 +109,18 @@ class ServerActivity : AppCompatActivity(), ApprovalDialog.ApprovalListener, Rem
                 intArrayOf(android.R.id.text1, android.R.id.text2)
             )
             rememberedList.adapter = rememberedAdapter
+
+            connectedAdapter = SimpleAdapter(
+                this,
+                connectedDeviceRows,
+                android.R.layout.simple_list_item_2,
+                arrayOf("name", "meta"),
+                intArrayOf(android.R.id.text1, android.R.id.text2)
+            )
+            connectedList.adapter = connectedAdapter
+            connectedList.setOnItemClickListener { _, _, position, _ ->
+                connectedSnapshot.getOrNull(position)?.let(::confirmDisconnectClient)
+            }
 
             rememberedList.setOnItemClickListener { _, _, position, _ ->
                 val selected = rememberedDeviceRows.getOrNull(position) ?: return@setOnItemClickListener
@@ -144,11 +162,46 @@ class ServerActivity : AppCompatActivity(), ApprovalDialog.ApprovalListener, Rem
             stopButton.isEnabled = false
             showPendingApprovalIfPresent(intent)
             observeRememberedDevices()
+            observeConnectedClients()
             probeServiceLiveness()
         } catch (e: Exception) {
             Toast.makeText(this, "Error initializing: ${e.message}", Toast.LENGTH_LONG).show()
             finish()
         }
+    }
+
+    private fun observeConnectedClients() {
+        lifecycleScope.launch {
+            BleHotspotService.connectedClients.collect { clients ->
+                connectedSnapshot = clients
+                connectedDeviceRows.clear()
+                clients.forEach { client ->
+                    connectedDeviceRows += mapOf(
+                        "name" to client.label,
+                        "meta" to getString(R.string.connected_client_detail)
+                    )
+                }
+                connectedAdapter?.notifyDataSetChanged()
+                findViewById<View>(R.id.list_connected_clients).visibility =
+                    if (clients.isEmpty()) View.GONE else View.VISIBLE
+                findViewById<View>(R.id.tv_connected_clients_empty).visibility =
+                    if (clients.isEmpty()) View.VISIBLE else View.GONE
+            }
+        }
+    }
+
+    private fun confirmDisconnectClient(client: BleHotspotService.ConnectedClientSummary) {
+        AlertDialog.Builder(this)
+            .setTitle(getString(R.string.disconnect_client_title, client.label))
+            .setMessage(getString(R.string.disconnect_client_message, client.label))
+            .setNegativeButton(android.R.string.cancel, null)
+            .setPositiveButton(R.string.disconnect_action) { _, _ ->
+                startService(Intent(this, BleHotspotService::class.java).apply {
+                    action = BleHotspotService.ACTION_DISCONNECT_CLIENT
+                    putExtra(BleHotspotService.EXTRA_CLIENT_STABLE_ID, client.stableId)
+                })
+            }
+            .show()
     }
 
     private fun observeRememberedDevices() {
@@ -331,8 +384,23 @@ class ServerActivity : AppCompatActivity(), ApprovalDialog.ApprovalListener, Rem
     }
 
     private fun stopSharing() {
-        Toast.makeText(this, "Stopping hotspot sharing", Toast.LENGTH_SHORT).show()
+        val clients = connectedSnapshot
+        AlertDialog.Builder(this)
+            .setTitle(R.string.stop_sharing_confirm_title)
+            .setMessage(
+                if (clients.isEmpty()) getString(R.string.stop_sharing_no_clients)
+                else getString(
+                    R.string.stop_sharing_with_clients,
+                    clients.joinToString("\n") { "• ${it.label}" }
+                )
+            )
+            .setNegativeButton(android.R.string.cancel, null)
+            .setPositiveButton(R.string.stop_sharing) { _, _ -> performStopSharing() }
+            .show()
+    }
 
+    private fun performStopSharing() {
+        Toast.makeText(this, "Stopping hotspot sharing", Toast.LENGTH_SHORT).show()
         val serviceIntent = Intent(this, BleHotspotService::class.java).apply {
             action = BleHotspotService.ACTION_STOP_SERVER
         }

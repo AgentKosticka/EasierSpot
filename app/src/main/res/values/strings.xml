@@ -30,9 +30,24 @@
     <string name="permissions_group_ble_title">Bluetooth permissions</string>
     <string name="permissions_group_ble_desc">Used for BLE scanning, pairing, and advertising during hotspot sharing.</string>
     <string name="permissions_item_ble_group">Bluetooth Scan, Connect and Advertise</string>
-    <string name="permissions_group_location_title">Nearby Wi-Fi permission</string>
-    <string name="permissions_group_location_desc">Used to confirm and join the paired hotspot. EasierSpot does not collect your location.</string>
-    <string name="permissions_item_location_group">Nearby Wi-Fi devices</string>
+    <string name="permissions_group_location_title">Wi-Fi identity access</string>
+    <string name="permissions_group_location_desc">Android classifies Wi-Fi network names as precise location information. EasierSpot uses this only to confirm that it joined the paired hotspot; it does not collect or store your physical location.</string>
+    <string name="permissions_item_location_group">Nearby Wi-Fi and precise location</string>
+    <string name="open_wifi_controls">Open Wi-Fi controls</string>
+    <string name="paired_connected_tap_disconnect">Connected · %1$d active client(s) · Tap to disconnect</string>
+    <string name="connected_clients_title">Currently connected</string>
+    <string name="connected_clients_empty">No phones are using this hotspot right now.</string>
+    <string name="connected_client_detail">Authenticated and active · Tap to disconnect</string>
+    <string name="disconnect_client_title">Disconnect %1$s?</string>
+    <string name="disconnect_client_message">%1$s will be told that the sharing phone ended its connection.</string>
+    <string name="disconnect_action">Disconnect</string>
+    <string name="stop_sharing_confirm_title">Turn off sharing?</string>
+    <string name="stop_sharing_no_clients">EasierSpot will stop advertising and turn off the hotspot it started.</string>
+    <string name="stop_sharing_with_clients">This will disconnect:\n%1$s</string>
+    <plurals name="dashboard_server_connected_clients">
+        <item quantity="one">Sharing with %1$d connected phone</item>
+        <item quantity="other">Sharing with %1$d connected phones</item>
+    </plurals>
     <string name="permissions_group_notifications_title">Notifications</string>
     <string name="permissions_group_notifications_desc">Needed for server approvals and low-power background discovery of previously paired shared Wi-Fi.</string>
     <string name="permissions_item_notifications">Post Notifications</string>

@@ -5,6 +5,7 @@ import android.bluetooth.BluetoothAdapter
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
+import android.provider.Settings
 import android.widget.Button
 import android.widget.ListView
 import android.widget.SimpleAdapter
@@ -26,6 +27,7 @@ import com.agentkosticka.easierspot.ble.client.TrustedServerStore
 import com.agentkosticka.easierspot.hotspot.WifiSuggestionInstaller
 import com.agentkosticka.easierspot.service.BleClientService
 import com.agentkosticka.easierspot.service.ClientConnectionState
+import com.agentkosticka.easierspot.service.ClientRecoveryAction
 import com.agentkosticka.easierspot.service.titleAndText
 import com.agentkosticka.easierspot.ui.permissions.PermissionsActivity
 import com.agentkosticka.easierspot.ui.settings.SettingsActivity
@@ -48,6 +50,8 @@ class ClientActivity : AppCompatActivity() {
     private var latestServers: List<DiscoveredServer> = emptyList()
     private var adapter: SimpleAdapter? = null
     private var renderJob: Job? = null
+    private var currentConnectionState: ClientConnectionState = ClientConnectionState.Idle
+    private var wifiPromptShown = false
     private val enableBluetooth = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { if (scanner.isBluetoothEnabled()) startScan() }
@@ -74,7 +78,12 @@ class ClientActivity : AppCompatActivity() {
             setOnItemClickListener { _, _, position, _ ->
                 val target = targets.getOrNull(position) ?: return@setOnItemClickListener
                 if (target.trusted != null) {
-                    BleClientService.connectTrusted(applicationContext, target.trusted.discoveryToken)
+                    val connected = currentConnectionState as? ClientConnectionState.Connected
+                    if (connected?.serverToken == target.trusted.discoveryToken) {
+                        BleClientService.disconnect(applicationContext)
+                    } else {
+                        BleClientService.connectTrusted(applicationContext, target.trusted.discoveryToken)
+                    }
                 } else {
                     target.discovered?.let { BleClientService.pair(applicationContext, it) }
                 }
@@ -102,7 +111,23 @@ class ClientActivity : AppCompatActivity() {
         }
         lifecycleScope.launch {
             BleClientService.connectionState.collect { state ->
+                currentConnectionState = state
                 if (state != ClientConnectionState.Idle) status.text = state.titleAndText().second
+                renderRows()
+                val wifiRecovery = state as? ClientConnectionState.Failed
+                if (wifiRecovery?.recovery == ClientRecoveryAction.WIFI_SETTINGS && !wifiPromptShown) {
+                    wifiPromptShown = true
+                    AlertDialog.Builder(this@ClientActivity)
+                        .setTitle(wifiRecovery.title)
+                        .setMessage(wifiRecovery.detail)
+                        .setNegativeButton(android.R.string.cancel, null)
+                        .setPositiveButton(R.string.open_wifi_controls) { _, _ ->
+                            startActivity(Intent(Settings.Panel.ACTION_WIFI))
+                        }
+                        .show()
+                } else if (wifiRecovery?.recovery != ClientRecoveryAction.WIFI_SETTINGS) {
+                    wifiPromptShown = false
+                }
             }
         }
     }
@@ -141,11 +166,19 @@ class ClientActivity : AppCompatActivity() {
             rows.clear()
             trusted.forEach { profile ->
                 val nearby = byToken[profile.discoveryToken]
+                val connected = (currentConnectionState as? ClientConnectionState.Connected)
+                    ?.takeIf { it.serverToken == profile.discoveryToken }
                 targets += RowTarget(profile, nearby)
                 rows += mapOf(
                     "name" to profile.label,
-                    "detail" to if (nearby != null) getString(R.string.paired_tap_connect)
-                    else getString(R.string.paired_not_nearby)
+                    "detail" to when {
+                        connected != null -> getString(
+                            R.string.paired_connected_tap_disconnect,
+                            connected.activeClientCount
+                        )
+                        nearby != null -> getString(R.string.paired_tap_connect)
+                        else -> getString(R.string.paired_not_nearby)
+                    }
                 )
             }
             discovered.filter { server -> trusted.none { it.discoveryToken == server.deviceId } }
