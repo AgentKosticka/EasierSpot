@@ -116,6 +116,9 @@ class HotspotManager(private val context: Context) {
 
     fun isShizukuAvailable(): Boolean = isShizukuReady()
 
+    fun isClientWifiEnabled(): Boolean =
+        context.applicationContext.getSystemService(WifiManager::class.java).isWifiEnabled
+
     /**
      * Add the supplied network as a normal saved network and actively switch the whole device to
      * it. The platform shell command uses WifiService.connect rather than an app-scoped request.

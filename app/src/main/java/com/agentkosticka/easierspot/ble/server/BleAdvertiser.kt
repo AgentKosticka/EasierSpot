@@ -103,9 +103,12 @@ class BleAdvertiser(
         }
 
         startResult = onResult
+        // Starting sharing is an explicit "I'm online now" event. Spend a short burst at the
+        // fastest legacy advertising interval and highest requested TX power so already-scanning
+        // clients see the phone immediately, then fall back to the user's battery-friendly mode.
         startWithMode(
-            mode = AdvertiseSettings.ADVERTISE_MODE_BALANCED,
-            txPower = AdvertiseSettings.ADVERTISE_TX_POWER_MEDIUM,
+            mode = AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY,
+            txPower = AdvertiseSettings.ADVERTISE_TX_POWER_HIGH,
             reportResult = true
         )
     }
@@ -212,8 +215,8 @@ class BleAdvertiser(
         mainHandler.removeCallbacks(downgradeRunnable)
         stopCurrentAdvertisement()
         startWithMode(
-            AdvertiseSettings.ADVERTISE_MODE_BALANCED,
-            AdvertiseSettings.ADVERTISE_TX_POWER_MEDIUM,
+            AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY,
+            AdvertiseSettings.ADVERTISE_TX_POWER_HIGH,
             reportResult = false
         )
         mainHandler.postDelayed(downgradeRunnable, BleConstants.WAKE_BOOST_MS)

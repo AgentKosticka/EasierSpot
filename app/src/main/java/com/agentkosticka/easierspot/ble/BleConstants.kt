@@ -27,6 +27,9 @@ object BleConstants {
     // Authenticated liveness/control messages - WRITE/WRITE_NO_RESPONSE
     val CHAR_SESSION_CONTROL: UUID = UUID.fromString("2df83cb5-ddb1-425a-b36f-535638fbfd05")
 
+    // Encrypted server state and roster updates - INDICATE + READ fallback
+    val CHAR_SERVER_STATUS: UUID = UUID.fromString("2df83cb5-ddb1-425a-b36f-535638fbfd06")
+
     // Client Characteristic Configuration Descriptor (CCCD)
     // Used by clients to enable notifications/indications
     val CLIENT_CONFIG_DESCRIPTOR_UUID: UUID =

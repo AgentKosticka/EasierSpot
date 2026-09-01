@@ -1,6 +1,7 @@
 package com.agentkosticka.easierspot
 
 import android.content.ComponentName
+import android.content.pm.PackageManager
 import android.view.ContextThemeWrapper
 import android.view.LayoutInflater
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -42,6 +43,30 @@ class EcosystemInfrastructureInstrumentedTest {
         @Suppress("DEPRECATION")
         val appInfo = context.packageManager.getApplicationInfo(context.packageName, 0)
         assertFalse(appInfo.flags and android.content.pm.ApplicationInfo.FLAG_ALLOW_BACKUP != 0)
+    }
+
+    @Test
+    fun clientDeclaresAndRequiresFineLocationForWifiIdentity() {
+        @Suppress("DEPRECATION")
+        val packageInfo = context.packageManager.getPackageInfo(
+            context.packageName,
+            PackageManager.GET_PERMISSIONS
+        )
+        assertTrue(
+            packageInfo.requestedPermissions.orEmpty().contains(
+                android.Manifest.permission.ACCESS_FINE_LOCATION
+            )
+        )
+        assertTrue(
+            com.agentkosticka.easierspot.ui.permissions.AppPermissions
+                .requiredFor(com.agentkosticka.easierspot.ui.permissions.AppPermissions.Role.CLIENT)
+                .contains(android.Manifest.permission.ACCESS_FINE_LOCATION)
+        )
+        assertFalse(
+            com.agentkosticka.easierspot.ui.permissions.AppPermissions
+                .requiredFor(com.agentkosticka.easierspot.ui.permissions.AppPermissions.Role.SERVER)
+                .contains(android.Manifest.permission.ACCESS_FINE_LOCATION)
+        )
     }
 
     @Test

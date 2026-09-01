@@ -43,7 +43,10 @@ object BleDiscoveryRegistrar {
         val settings = ScanSettings.Builder()
             .setScanMode(ScanSettings.SCAN_MODE_BALANCED)
             .setCallbackType(ScanSettings.CALLBACK_TYPE_ALL_MATCHES)
-            .setReportDelay(5_000L)
+            // Do not batch paired-server arrivals. The server already pays for a short
+            // high-power startup burst; delaying delivery here makes the user's explicit
+            // "start sharing" action feel broken even though the radio saw it immediately.
+            .setReportDelay(0L)
             .build()
         // PendingIntent scan registrations can survive process death and package replacement.
         // Replace the old registration explicitly so updated latency/filter settings take effect.

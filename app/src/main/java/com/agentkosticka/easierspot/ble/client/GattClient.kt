@@ -19,6 +19,7 @@ import com.agentkosticka.easierspot.ble.BleConstants
 import com.agentkosticka.easierspot.ble.BleAuthFraming
 import com.agentkosticka.easierspot.ble.BleDiscoveryProtocol
 import com.agentkosticka.easierspot.ble.BleSessionCrypto
+import com.agentkosticka.easierspot.ble.ServerStatusMessage
 import com.agentkosticka.easierspot.data.model.HotspotCredentials
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -47,8 +48,8 @@ class GattClient(private val context: Context) {
     private var pendingDeviceIdRead = false
     private var pendingClientIdWrite = false
 
-    // CCCD Cccd
     private var pendingHotspotCccdWrite = false
+    private var pendingServerStatusCccdWrite = false
     private var pendingHotspotRead = false
     private var pendingApprovalRead = false
     private var approvalPollJob: Job? = null
@@ -67,6 +68,10 @@ class GattClient(private val context: Context) {
     private var authFrames: List<ByteArray> = emptyList()
     private var authFrameIndex = 0
     private var pendingAuthBytes: ByteArray? = null
+    // BleClientService historically calls disconnect() once after Wi-Fi verification. Once the
+    // new live-status channel is ready, consume that one legacy disconnect as a request to park
+    // GATT at low power instead. Later explicit cleanup still closes the transport normally.
+    private var preserveNextDisconnectForLiveStatus = false
 
     private val _connectionState = MutableStateFlow<ConnectionState>(ConnectionState.DISCONNECTED)
     val connectionState: StateFlow<ConnectionState> = _connectionState.asStateFlow()
@@ -87,6 +92,8 @@ class GattClient(private val context: Context) {
     val serverDeviceId: StateFlow<String?> = _serverDeviceId.asStateFlow()
     private val _pairingCode = MutableStateFlow<String?>(null)
     val pairingCode: StateFlow<String?> = _pairingCode.asStateFlow()
+    private val _serverStatus = MutableStateFlow<ServerStatusMessage?>(null)
+    val serverStatus: StateFlow<ServerStatusMessage?> = _serverStatus.asStateFlow()
 
     enum class ConnectionState {
         DISCONNECTED,
@@ -125,6 +132,7 @@ class GattClient(private val context: Context) {
         stopApprovalPolling()
         gatt?.close()
         gatt = null
+        preserveNextDisconnectForLiveStatus = false
 
         _connectionState.value = ConnectionState.CONNECTING
         _phase.value = GattPhase.Connecting
@@ -134,11 +142,13 @@ class GattClient(private val context: Context) {
         pendingDeviceIdRead = false
         pendingClientIdWrite = false
         pendingHotspotCccdWrite = false
+        pendingServerStatusCccdWrite = false
         pendingHotspotRead = false
         pendingApprovalRead = false
         serviceDiscoveryStarted = false
         _serverDeviceId.value = null
         _pairingCode.value = null
+        _serverStatus.value = null
         serverHello = null
         sessionKey = null
         this.expectedServerFingerprint = expectedServerFingerprint
@@ -154,6 +164,17 @@ class GattClient(private val context: Context) {
     }
 
     fun disconnect() {
+        if (preserveNextDisconnectForLiveStatus &&
+            _connectionState.value == ConnectionState.CONNECTED &&
+            _phase.value == GattPhase.Ready &&
+            _receivedCredentials.value != null
+        ) {
+            preserveNextDisconnectForLiveStatus = false
+            gatt?.requestConnectionPriority(BluetoothGatt.CONNECTION_PRIORITY_LOW_POWER)
+            Log.d(TAG, "Keeping authenticated GATT alive for live server status")
+            return
+        }
+        preserveNextDisconnectForLiveStatus = false
         stopApprovalPolling()
         stopConnectionTimeouts()
         gatt?.disconnect()
@@ -165,6 +186,7 @@ class GattClient(private val context: Context) {
         pendingDeviceIdRead = false
         pendingClientIdWrite = false
         pendingHotspotCccdWrite = false
+        pendingServerStatusCccdWrite = false
         pendingHotspotRead = false
         pendingApprovalRead = false
         serviceDiscoveryStarted = false
@@ -178,14 +200,20 @@ class GattClient(private val context: Context) {
         pendingAuthBytes?.fill(0)
         pendingAuthBytes = null
         _pairingCode.value = null
+        _serverStatus.value = null
     }
 
-    fun requestLowPowerConnection(): Boolean =
-        gatt?.requestConnectionPriority(BluetoothGatt.CONNECTION_PRIORITY_LOW_POWER) == true
+    fun requestLowPowerConnection(): Boolean {
+        preserveNextDisconnectForLiveStatus = true
+        return gatt?.requestConnectionPriority(BluetoothGatt.CONNECTION_PRIORITY_LOW_POWER) == true
+    }
 
     fun sendHeartbeat(): Boolean = sendSessionControl(BleConstants.CONTROL_HEARTBEAT)
 
-    fun sendGoodbye(): Boolean = sendSessionControl(BleConstants.CONTROL_GOODBYE)
+    fun sendGoodbye(): Boolean {
+        preserveNextDisconnectForLiveStatus = false
+        return sendSessionControl(BleConstants.CONTROL_GOODBYE)
+    }
 
     @Synchronized
     fun distressPayload(): ByteArray? = sessionKey?.let {
@@ -225,9 +253,7 @@ class GattClient(private val context: Context) {
         }
     }
 
-    private fun getConnectionTimeoutMs(): Long {
-        return CONNECTION_TIMEOUT_MS
-    }
+    private fun getConnectionTimeoutMs(): Long = CONNECTION_TIMEOUT_MS
 
     private fun startConnectionTimeout() {
         connectionTimeoutJob?.cancel()
@@ -238,6 +264,7 @@ class GattClient(private val context: Context) {
                 _gattError.value = "BLE connection timed out"
                 _phase.value = GattPhase.Failed("BLE connection timed out")
                 _connectionState.value = ConnectionState.ERROR
+                preserveNextDisconnectForLiveStatus = false
                 gatt?.close()
                 gatt = null
             }
@@ -253,6 +280,7 @@ class GattClient(private val context: Context) {
                 _gattError.value = "Service discovery timed out"
                 _phase.value = GattPhase.Failed("Service discovery timed out")
                 _connectionState.value = ConnectionState.ERROR
+                preserveNextDisconnectForLiveStatus = false
                 gatt?.close()
                 gatt = null
             }
@@ -334,9 +362,7 @@ class GattClient(private val context: Context) {
             ?.getCharacteristic(BleConstants.CHAR_DEVICE_ID)
         if (characteristic != null) {
             val started = gatt?.readCharacteristic(characteristic) == true
-            if (!started) {
-                _gattError.value = "Failed to start device ID read"
-            }
+            if (!started) _gattError.value = "Failed to start device ID read"
         } else {
             _gattError.value = "Device ID characteristic missing"
         }
@@ -354,9 +380,7 @@ class GattClient(private val context: Context) {
             _gattError.value = "Could not authenticate client: ${it.message}"
             return
         }
-
         pendingAuthBytes = clientIdBytes
-
         val currentGatt = gatt ?: return
         if (currentGatt.requestMtu(TARGET_MTU)) {
             mtuFallbackJob?.cancel()
@@ -391,7 +415,6 @@ class GattClient(private val context: Context) {
             failAuthentication("Authentication frame sequence is unavailable")
             return
         }
-
         val started = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             gatt?.writeCharacteristic(characteristic, frame, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT) == BluetoothStatusCodes.SUCCESS
         } else {
@@ -400,7 +423,6 @@ class GattClient(private val context: Context) {
             @Suppress("DEPRECATION")
             gatt?.writeCharacteristic(characteristic) == true
         }
-
         if (!started) {
             failAuthentication("Failed to write authentication frame ${authFrameIndex + 1}/${authFrames.size}")
         } else {
@@ -453,20 +475,17 @@ class GattClient(private val context: Context) {
             _gattError.value = "BLE service not found"
             return
         }
-
         val approvalChar = service.getCharacteristic(BleConstants.CHAR_APPROVAL_STATUS)
         val hotspotChar = service.getCharacteristic(BleConstants.CHAR_HOTSPOT_DATA)
         if (approvalChar == null || hotspotChar == null) {
             _gattError.value = "Required BLE characteristics missing"
             return
         }
-
         val approvalNotifications = gatt!!.setCharacteristicNotification(approvalChar, true)
         val hotspotNotifications = gatt!!.setCharacteristicNotification(hotspotChar, true)
         if (!approvalNotifications || !hotspotNotifications) {
             Log.w(TAG, "Indications are unavailable; using characteristic-read polling")
         }
-
         val approvalCccd = approvalChar.getDescriptor(BleConstants.CLIENT_CONFIG_DESCRIPTOR_UUID)
         val hotspotCccd = hotspotChar.getDescriptor(BleConstants.CLIENT_CONFIG_DESCRIPTOR_UUID)
         if (approvalCccd == null || hotspotCccd == null) {
@@ -475,7 +494,6 @@ class GattClient(private val context: Context) {
             readDeviceIdCharacteristic()
             return
         }
-
         val writeResult = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             gatt!!.writeDescriptor(approvalCccd, BluetoothGattDescriptor.ENABLE_INDICATION_VALUE) == BluetoothStatusCodes.SUCCESS
         } else {
@@ -484,7 +502,6 @@ class GattClient(private val context: Context) {
             @Suppress("DEPRECATION")
             gatt!!.writeDescriptor(approvalCccd)
         }
-
         if (!writeResult) {
             Log.w(TAG, "Approval CCCD write was not accepted; continuing with read polling")
             pendingDeviceIdRead = false
@@ -499,7 +516,6 @@ class GattClient(private val context: Context) {
             _gattError.value = "Hotspot payload too short: ${data.size} bytes"
             return null
         }
-
         if (data[0] != BleConstants.PROTOCOL_VERSION) {
             _gattError.value = "Unsupported hotspot protocol version"
             return null
@@ -515,28 +531,22 @@ class GattClient(private val context: Context) {
         val ssidStart = 4
         val ssidEnd = ssidStart + ssidLength
         if (data.size < ssidEnd + 1) {
-            _gattError.value =
-                "Hotspot payload truncated before password length (expected >= ${ssidEnd + 1}, got ${data.size})"
+            _gattError.value = "Hotspot payload truncated before password length (expected >= ${ssidEnd + 1}, got ${data.size})"
             return null
         }
-
         val passwordLength = data[ssidEnd].toInt() and 0xFF
         val passwordStart = ssidEnd + 1
         val passwordEnd = passwordStart + passwordLength
         if (data.size < passwordEnd) {
-            _gattError.value =
-                "Hotspot payload truncated before password bytes (expected >= $passwordEnd, got ${data.size})"
+            _gattError.value = "Hotspot payload truncated before password bytes (expected >= $passwordEnd, got ${data.size})"
             return null
         }
-
         val ssid = String(data.copyOfRange(ssidStart, ssidEnd), StandardCharsets.UTF_8)
         val password = String(data.copyOfRange(passwordStart, passwordEnd), StandardCharsets.UTF_8)
-
         if (ssid.isEmpty()) {
             _gattError.value = "Hotspot payload decoded with empty SSID"
             return null
         }
-
         return HotspotCredentials(ssid, password, securityType, isHidden)
     }
 
@@ -560,17 +570,69 @@ class GattClient(private val context: Context) {
         }
     }
 
+    private fun enableServerStatusChannel() {
+        if (pendingServerStatusCccdWrite) return
+        val currentGatt = gatt ?: return
+        val characteristic = currentGatt.getService(BleConstants.SERVICE_UUID)
+            ?.getCharacteristic(BleConstants.CHAR_SERVER_STATUS) ?: run {
+            // Live status was added after protocol-v3 shipped; keep credential sharing compatible
+            // with an older peer and simply operate without the optional status channel.
+            Log.w(TAG, "Peer does not expose the optional server-status characteristic")
+            return
+        }
+        if (!currentGatt.setCharacteristicNotification(characteristic, true)) {
+            readServerStatusCharacteristic()
+            return
+        }
+        val descriptor = characteristic.getDescriptor(BleConstants.CLIENT_CONFIG_DESCRIPTOR_UUID)
+            ?: run {
+                readServerStatusCharacteristic()
+                return
+            }
+        val accepted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            currentGatt.writeDescriptor(descriptor, BluetoothGattDescriptor.ENABLE_INDICATION_VALUE) ==
+                BluetoothStatusCodes.SUCCESS
+        } else {
+            @Suppress("DEPRECATION")
+            descriptor.value = BluetoothGattDescriptor.ENABLE_INDICATION_VALUE
+            @Suppress("DEPRECATION")
+            currentGatt.writeDescriptor(descriptor)
+        }
+        if (accepted) pendingServerStatusCccdWrite = true else readServerStatusCharacteristic()
+    }
+
+    private fun readServerStatusCharacteristic() {
+        val characteristic = gatt?.getService(BleConstants.SERVICE_UUID)
+            ?.getCharacteristic(BleConstants.CHAR_SERVER_STATUS) ?: return
+        gatt?.readCharacteristic(characteristic)
+    }
+
+    private fun decodeServerStatus(envelope: ByteArray): ServerStatusMessage? {
+        val key = sessionKey ?: return null
+        val hello = serverHello ?: return null
+        val plaintext = runCatching {
+            BleSessionCrypto.decrypt(key, envelope, hello.nonce)
+        }.getOrElse {
+            _gattError.value = "Server status authentication failed"
+            return null
+        }
+        return try {
+            ServerStatusMessage.decode(plaintext)
+        } finally {
+            plaintext.fill(0)
+        }
+    }
+
     private inner class GattCallbackImpl : BluetoothGattCallback() {
         override fun onConnectionStateChange(gatt: BluetoothGatt, status: Int, newState: Int) {
             super.onConnectionStateChange(gatt, status, newState)
-
             if (this@GattClient.gatt !== gatt) {
                 gatt.close()
                 return
             }
-
             if (status != BluetoothGatt.GATT_SUCCESS) {
                 stopConnectionTimeouts()
+                preserveNextDisconnectForLiveStatus = false
                 _gattError.value = "GATT connection failed (status=$status)"
                 _phase.value = GattPhase.Failed("GATT connection failed (status=$status)")
                 _connectionState.value = ConnectionState.ERROR
@@ -578,7 +640,6 @@ class GattClient(private val context: Context) {
                 if (this@GattClient.gatt === gatt) this@GattClient.gatt = null
                 return
             }
-
             when (newState) {
                 BluetoothProfile.STATE_CONNECTED -> {
                     connectionTimeoutJob?.cancel()
@@ -587,12 +648,11 @@ class GattClient(private val context: Context) {
                     _phase.value = GattPhase.DiscoveringServices
                     startServiceDiscoveryTimeout()
                     gatt.requestConnectionPriority(BluetoothGatt.CONNECTION_PRIORITY_HIGH)
-                    // Android performs long characteristic reads transparently. Discovering now
-                    // removes the former two-second MTU gate from pairing and credential refresh.
                     beginServiceDiscovery(gatt)
                 }
                 BluetoothProfile.STATE_DISCONNECTED -> {
                     stopConnectionTimeouts()
+                    preserveNextDisconnectForLiveStatus = false
                     if (_connectionState.value != ConnectionState.ERROR) {
                         _connectionState.value = ConnectionState.DISCONNECTED
                     }
@@ -621,12 +681,7 @@ class GattClient(private val context: Context) {
             mtuFallbackJob = null
             serviceDiscoveryTimeoutJob?.cancel()
             serviceDiscoveryTimeoutJob = null
-
             if (status == BluetoothGatt.GATT_SUCCESS) {
-                // Authentication must never depend on CCCD writes. Several OEM stacks accept a
-                // descriptor write and never deliver its callback, which previously prevented the
-                // client identity from reaching the server at all. Approval and credential
-                // characteristics are readable, so polling is the portable primary path.
                 pendingDeviceIdRead = false
                 readDeviceIdCharacteristic()
             } else {
@@ -663,16 +718,15 @@ class GattClient(private val context: Context) {
         ) {
             if (this@GattClient.gatt !== gatt) return
             if (status != BluetoothGatt.GATT_SUCCESS) {
-                if (characteristic.uuid == BleConstants.CHAR_APPROVAL_STATUS) {
-                    pendingApprovalRead = false
+                if (characteristic.uuid == BleConstants.CHAR_APPROVAL_STATUS) pendingApprovalRead = false
+                if (characteristic.uuid == BleConstants.CHAR_HOTSPOT_DATA) pendingHotspotRead = false
+                if (characteristic.uuid != BleConstants.CHAR_SERVER_STATUS) {
+                    _gattError.value = "Characteristic read failed"
+                } else {
+                    Log.w(TAG, "Optional server-status read failed; continuing without live updates")
                 }
-                if (characteristic.uuid == BleConstants.CHAR_HOTSPOT_DATA) {
-                    pendingHotspotRead = false
-                }
-                _gattError.value = "Characteristic read failed"
                 return
             }
-
             when (characteristic.uuid) {
                 BleConstants.CHAR_DEVICE_ID -> {
                     val hello = runCatching { BleSessionCrypto.parseServerHello(value) }
@@ -693,11 +747,7 @@ class GattClient(private val context: Context) {
                         return
                     }
                     _serverDeviceId.value = actualFingerprint
-                    sessionKey = BleSessionCrypto.sessionKey(
-                        clientKeyPair.private,
-                        hello.publicKey,
-                        hello.nonce
-                    )
+                    sessionKey = BleSessionCrypto.sessionKey(clientKeyPair.private, hello.publicKey, hello.nonce)
                     _pairingCode.value = BleSessionCrypto.pairingCode(sessionKey!!, hello.nonce)
                     writeClientIdCharacteristic()
                 }
@@ -707,13 +757,11 @@ class GattClient(private val context: Context) {
                     Log.d(TAG, "Approval status read: 0x${String.format("%02X", statusValue)}")
                     when (statusValue) {
                         BleConstants.APPROVAL_GRANTED.toInt() -> {
-                            Log.d(TAG, "Already approved, reading hotspot data")
                             _approvalStatus.value = ApprovalStatus.APPROVED
                             pendingHotspotRead = true
                             readHotspotDataCharacteristic()
                         }
                         BleConstants.APPROVAL_PENDING.toInt() -> {
-                            Log.d(TAG, "Pending approval; indication plus read polling active")
                             _phase.value = GattPhase.WaitingForServer
                             startApprovalPolling()
                         }
@@ -730,9 +778,7 @@ class GattClient(private val context: Context) {
                             _approvalStatus.value = ApprovalStatus.ACTIVATION_FAILED
                             stopApprovalPolling()
                         }
-                        else -> {
-                            Log.w(TAG, "Unknown approval status: $statusValue")
-                        }
+                        else -> Log.w(TAG, "Unknown approval status: $statusValue")
                     }
                 }
                 BleConstants.CHAR_HOTSPOT_DATA -> {
@@ -740,15 +786,18 @@ class GattClient(private val context: Context) {
                     if (value.isNotEmpty()) {
                         val credentials = decryptHotspotData(value)
                         if (credentials != null) {
-                            Log.d(TAG, "Received hotspot payload via read for SSID=${credentials.ssid}")
                             stopApprovalPolling()
                             _phase.value = GattPhase.Ready
                             _receivedCredentials.value = credentials
                             pendingHotspotRead = false
+                            enableServerStatusChannel()
                         }
                     } else {
                         Log.w(TAG, "Hotspot data read returned empty - credentials not ready yet")
                     }
+                }
+                BleConstants.CHAR_SERVER_STATUS -> {
+                    decodeServerStatus(value)?.let { _serverStatus.value = it }
                 }
             }
         }
@@ -777,27 +826,26 @@ class GattClient(private val context: Context) {
             value: ByteArray
         ) {
             Log.d(TAG, "onCharacteristicChanged: uuid=${characteristic.uuid}, value size=${value.size}")
-
             when (characteristic.uuid) {
                 BleConstants.CHAR_HOTSPOT_DATA -> {
-                    Log.d(TAG, "Received hotspot notification, data size=${value.size}")
                     pendingHotspotRead = false
                     val credentials = decryptHotspotData(value)
                     if (credentials != null) {
-                        Log.d(TAG, "Decoded hotspot credentials: SSID=${credentials.ssid}")
                         stopApprovalPolling()
                         _phase.value = GattPhase.Ready
                         _receivedCredentials.value = credentials
+                        enableServerStatusChannel()
                     } else {
                         Log.w(TAG, "Failed to decode hotspot data")
                     }
                 }
+                BleConstants.CHAR_SERVER_STATUS -> {
+                    decodeServerStatus(value)?.let { _serverStatus.value = it }
+                }
                 BleConstants.CHAR_APPROVAL_STATUS -> {
                     val status = value.firstOrNull()?.toInt() ?: -1
-                    Log.d(TAG, "Received approval notification: 0x${String.format("%02X", status)}")
                     when (status) {
                         BleConstants.APPROVAL_GRANTED.toInt() -> {
-                            Log.d(TAG, "Approval granted by server")
                             _approvalStatus.value = ApprovalStatus.APPROVED
                             if (_receivedCredentials.value == null && !pendingHotspotRead) {
                                 pendingHotspotRead = true
@@ -805,7 +853,6 @@ class GattClient(private val context: Context) {
                             }
                         }
                         BleConstants.APPROVAL_DENIED.toInt() -> {
-                            Log.d(TAG, "Connection denied by server")
                             stopApprovalPolling()
                             pendingHotspotRead = false
                             _approvalStatus.value = ApprovalStatus.DENIED
@@ -818,9 +865,7 @@ class GattClient(private val context: Context) {
                             stopApprovalPolling()
                             _approvalStatus.value = ApprovalStatus.ACTIVATION_FAILED
                         }
-                        else -> {
-                            Log.w(TAG, "Unknown approval notification value: $status")
-                        }
+                        else -> Log.w(TAG, "Unknown approval notification value: $status")
                     }
                 }
             }
@@ -830,7 +875,12 @@ class GattClient(private val context: Context) {
             super.onDescriptorWrite(gatt, descriptor, status)
             if (this@GattClient.gatt !== gatt) return
             if (status != BluetoothGatt.GATT_SUCCESS) {
-                Log.w(TAG, "Descriptor write failed for ${descriptor.characteristic.uuid}; using read polling")
+                Log.w(TAG, "Descriptor write failed for ${descriptor.characteristic.uuid}; using read fallback")
+                if (descriptor.characteristic.uuid == BleConstants.CHAR_SERVER_STATUS) {
+                    pendingServerStatusCccdWrite = false
+                    readServerStatusCharacteristic()
+                    return
+                }
                 pendingHotspotCccdWrite = false
                 if (pendingDeviceIdRead) {
                     pendingDeviceIdRead = false
@@ -868,9 +918,12 @@ class GattClient(private val context: Context) {
                 pendingHotspotCccdWrite = false
                 if (pendingDeviceIdRead) {
                     pendingDeviceIdRead = false
-                    Log.d(TAG, "CCCD setup complete, reading device ID")
                     readDeviceIdCharacteristic()
                 }
+            }
+            if (descriptor.characteristic.uuid == BleConstants.CHAR_SERVER_STATUS) {
+                pendingServerStatusCccdWrite = false
+                readServerStatusCharacteristic()
             }
         }
 
@@ -881,9 +934,7 @@ class GattClient(private val context: Context) {
         ) {
             super.onCharacteristicWrite(gatt, characteristic, status)
             if (this@GattClient.gatt !== gatt) return
-            if (characteristic.uuid != BleConstants.CHAR_CLIENT_ID || !pendingClientIdWrite) {
-                return
-            }
+            if (characteristic.uuid != BleConstants.CHAR_CLIENT_ID || !pendingClientIdWrite) return
             pendingClientIdWrite = false
             clientAuthFallbackJob?.cancel()
             clientAuthFallbackJob = null
@@ -892,16 +943,13 @@ class GattClient(private val context: Context) {
                     authFrameIndex++
                     sendCurrentAuthFrame()
                 } else {
-                    Log.d(TAG, "Authenticated client identity transfer complete")
                     authFrames = emptyList()
                     authFrameIndex = 0
                     readApprovalCharacteristic()
                     startApprovalPolling()
                 }
             } else {
-                failAuthentication(
-                    "Authentication frame ${authFrameIndex + 1}/${authFrames.size} failed (status=$status)"
-                )
+                failAuthentication("Authentication frame ${authFrameIndex + 1}/${authFrames.size} failed (status=$status)")
             }
         }
     }
