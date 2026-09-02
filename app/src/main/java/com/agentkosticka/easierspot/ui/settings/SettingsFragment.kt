@@ -102,7 +102,7 @@ class SettingsFragment : PreferenceFragmentCompat() {
         val pref = findPreference<Preference>("system_wifi_picker_status") ?: return
         pref.summary = getString(R.string.pref_system_wifi_picker_checking)
         lifecycleScope.launch(Dispatchers.IO) {
-            val diagnostics = SystemWifiPickerIntegration.reconcile(
+            val diagnostics = SystemWifiPickerIntegration.diagnostics(
                 requireContext().applicationContext
             )
             withContext(Dispatchers.Main) {
