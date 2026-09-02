@@ -8,13 +8,17 @@ import com.agentkosticka.easierspot.util.LogUtils
 import java.util.Locale
 
 /**
- * Reconciles every path EasierSpot can use to surface a server from Android Wi-Fi Settings.
+ * Reconciles every path EasierSpot can use to surface a nearby server from Android Wi-Fi Settings.
  *
- * Native Shared Connectivity is preferred because it creates true framework HotspotNetwork rows.
- * On devices where Android has selected another provider, the picker companion supplies BLE-backed
- * virtual rows even while the physical AP is off. WifiNetworkSuggestion remains the final public
- * fallback for the real AP after it becomes scan-visible; Android never displays suggestions as
- * offline rows.
+ * Shared Connectivity is preferred because it creates a real framework HotspotNetwork entry while
+ * the server's physical Wi-Fi AP is still off. EasierSpot can use an already-selected provider, a
+ * pre-installed mutable overlay, or verified fabricated framework overlays when Shizuku is running
+ * as root. Regular shell-backed Shizuku cannot fabricate framework overlays.
+ *
+ * Where native provider selection is unavailable, the tightly scoped accessibility picker companion
+ * is the virtual-row fallback. Shizuku can enable it without replacing other accessibility services;
+ * without Shizuku the user can opt in from Android Accessibility settings. WifiNetworkSuggestion is
+ * retained as the final public fallback for the real AP after its SSID becomes scan-visible.
  */
 object SystemWifiPickerIntegration {
     private const val TAG = "SystemWifiPicker"
@@ -48,24 +52,23 @@ object SystemWifiPickerIntegration {
             appendLine("Visible-AP picker suggestions: $pickerSelectableSuggestionCount")
             appendLine("Picker suggestions repaired this check: $repairedSuggestionCount")
             appendLine()
-            appendLine("Native remote entries (Shared Connectivity)")
+            appendLine("Native offline entries (Shared Connectivity)")
             append(native.report())
             if (!native.capability.isActive) {
                 appendLine()
                 appendLine()
                 append(
-                    "Android Wi-Fi suggestions require a matching scan result and therefore cannot " +
-                        "represent a hotspot that is still off. EasierSpot uses its Wi-Fi picker " +
-                        "companion to show recently advertising paired servers before hotspot " +
-                        "startup. Shizuku can enable that companion automatically; without Shizuku " +
-                        "enable ‘EasierSpot Wi-Fi picker’ in Android Accessibility settings. The " +
-                        "service observes Settings window changes only and does not read screen content."
+                    "Android Wi-Fi suggestions require a matching scan result, so they cannot " +
+                        "represent a hotspot that is still off. EasierSpot therefore uses the " +
+                        "Wi-Fi picker companion for recently advertising paired servers when " +
+                        "native Shared Connectivity is unavailable. The companion only observes " +
+                        "Settings window-state changes and does not retrieve window content."
                 )
             }
         }
     }
 
-    /** Runs off main: Room/WifiManager reconciliation plus optional Shizuku secure-settings setup. */
+    /** Runs off main: Room/WifiManager reconciliation plus optional Shizuku companion setup. */
     fun reconcileSuggestions(context: Context) {
         val app = context.applicationContext
         val suggestions = reconcileSuggestionSnapshot(app)
@@ -146,8 +149,8 @@ object SystemWifiPickerIntegration {
     }
 
     private fun stateLabel(state: SystemWifiPickerState): String = when (state) {
-        SystemWifiPickerState.NATIVE_REMOTE_ENTRIES -> "native remote entries active"
-        SystemWifiPickerState.SUGGESTION_ACTIVE -> "picker companion / visible-hotspot fallback active"
+        SystemWifiPickerState.NATIVE_REMOTE_ENTRIES -> "native offline remote entries active"
+        SystemWifiPickerState.SUGGESTION_ACTIVE -> "offline picker companion / visible-hotspot fallback active"
         SystemWifiPickerState.SUGGESTION_READY -> "visible-hotspot suggestion fallback ready"
         SystemWifiPickerState.SUGGESTION_NEEDS_REFRESH -> "offline picker companion needs setup"
         SystemWifiPickerState.SUGGESTION_APPROVAL_PENDING -> "waiting for Android suggestion approval"
