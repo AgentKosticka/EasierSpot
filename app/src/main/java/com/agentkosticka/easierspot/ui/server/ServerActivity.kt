@@ -17,6 +17,7 @@ import android.widget.Button
 import android.widget.ImageButton
 import android.widget.ListView
 import android.widget.SimpleAdapter
+import android.widget.TextView
 import android.widget.Toast
 import android.view.View
 import androidx.activity.result.contract.ActivityResultContracts
@@ -27,6 +28,7 @@ import androidx.lifecycle.lifecycleScope
 import com.agentkosticka.easierspot.R
 import com.agentkosticka.easierspot.data.db.AppDatabase
 import com.agentkosticka.easierspot.data.model.RememberedServer
+import com.agentkosticka.easierspot.hotspot.HotspotClientRegistry
 import com.agentkosticka.easierspot.service.BleHotspotService
 import com.agentkosticka.easierspot.ui.dialogs.ApprovalDialog
 import com.agentkosticka.easierspot.ui.dialogs.RememberedDeviceDialog
@@ -41,7 +43,7 @@ class ServerActivity : AppCompatActivity(), ApprovalDialog.ApprovalListener, Rem
         private const val APPROVAL_DIALOG_TAG = "approval_dialog"
         private const val REMEMBERED_DIALOG_TAG = "remembered_dialog"
     }
-    
+
     private val deviceId = UUID.randomUUID().toString().take(4)
     private val database by lazy { AppDatabase.getDatabase(this) }
     private val rememberedDeviceRows = mutableListOf<Map<String, String>>()
@@ -49,6 +51,9 @@ class ServerActivity : AppCompatActivity(), ApprovalDialog.ApprovalListener, Rem
     private val connectedDeviceRows = mutableListOf<Map<String, String>>()
     private var connectedAdapter: SimpleAdapter? = null
     private var connectedSnapshot: List<BleHotspotService.ConnectedClientSummary> = emptyList()
+    private val externalDeviceRows = mutableListOf<Map<String, String>>()
+    private var externalAdapter: SimpleAdapter? = null
+    private var externalSnapshot: List<HotspotClientRegistry.ExternalClientSummary> = emptyList()
     private var approvalReceiverRegistered = false
     private var serviceBound = false
     private val serviceConnection = object : ServiceConnection {
@@ -90,7 +95,7 @@ class ServerActivity : AppCompatActivity(), ApprovalDialog.ApprovalListener, Rem
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        
+
         try {
             setContentView(R.layout.activity_server)
             title = "Share Hotspot"
@@ -100,6 +105,7 @@ class ServerActivity : AppCompatActivity(), ApprovalDialog.ApprovalListener, Rem
             val settingsButton = findViewById<ImageButton>(R.id.btn_server_settings)
             val rememberedList = findViewById<ListView>(R.id.list_remembered_devices)
             val connectedList = findViewById<ListView>(R.id.list_connected_clients)
+            val externalList = findViewById<ListView>(R.id.list_external_clients)
 
             rememberedAdapter = SimpleAdapter(
                 this,
@@ -121,6 +127,15 @@ class ServerActivity : AppCompatActivity(), ApprovalDialog.ApprovalListener, Rem
             connectedList.setOnItemClickListener { _, _, position, _ ->
                 connectedSnapshot.getOrNull(position)?.let(::confirmDisconnectClient)
             }
+
+            externalAdapter = SimpleAdapter(
+                this,
+                externalDeviceRows,
+                android.R.layout.simple_list_item_2,
+                arrayOf("name", "meta"),
+                intArrayOf(android.R.id.text1, android.R.id.text2)
+            )
+            externalList.adapter = externalAdapter
 
             rememberedList.setOnItemClickListener { _, _, position, _ ->
                 val selected = rememberedDeviceRows.getOrNull(position) ?: return@setOnItemClickListener
@@ -163,6 +178,8 @@ class ServerActivity : AppCompatActivity(), ApprovalDialog.ApprovalListener, Rem
             showPendingApprovalIfPresent(intent)
             observeRememberedDevices()
             observeConnectedClients()
+            observeExternalClients()
+            observeExternalDetection()
             probeServiceLiveness()
         } catch (e: Exception) {
             Toast.makeText(this, "Error initializing: ${e.message}", Toast.LENGTH_LONG).show()
@@ -173,9 +190,12 @@ class ServerActivity : AppCompatActivity(), ApprovalDialog.ApprovalListener, Rem
     private fun observeConnectedClients() {
         lifecycleScope.launch {
             BleHotspotService.connectedClients.collect { clients ->
-                connectedSnapshot = clients
+                val easierspotClients = clients.filterNot { client ->
+                    HotspotClientRegistry.isExternalLifecycleLease(client.stableId)
+                }
+                connectedSnapshot = easierspotClients
                 connectedDeviceRows.clear()
-                clients.forEach { client ->
+                easierspotClients.forEach { client ->
                     connectedDeviceRows += mapOf(
                         "name" to client.label,
                         "meta" to getString(R.string.connected_client_detail)
@@ -183,11 +203,53 @@ class ServerActivity : AppCompatActivity(), ApprovalDialog.ApprovalListener, Rem
                 }
                 connectedAdapter?.notifyDataSetChanged()
                 findViewById<View>(R.id.list_connected_clients).visibility =
-                    if (clients.isEmpty()) View.GONE else View.VISIBLE
+                    if (easierspotClients.isEmpty()) View.GONE else View.VISIBLE
                 findViewById<View>(R.id.tv_connected_clients_empty).visibility =
-                    if (clients.isEmpty()) View.VISIBLE else View.GONE
+                    if (easierspotClients.isEmpty()) View.VISIBLE else View.GONE
             }
         }
+    }
+
+    private fun observeExternalClients() {
+        lifecycleScope.launch {
+            HotspotClientRegistry.externalClients.collect { clients ->
+                externalSnapshot = clients
+                externalDeviceRows.clear()
+                clients.forEach { client ->
+                    externalDeviceRows += mapOf(
+                        "name" to client.label,
+                        "meta" to client.detail.ifBlank {
+                            getString(R.string.external_client_default_detail)
+                        }
+                    )
+                }
+                externalAdapter?.notifyDataSetChanged()
+                findViewById<View>(R.id.list_external_clients).visibility =
+                    if (clients.isEmpty()) View.GONE else View.VISIBLE
+                findViewById<View>(R.id.tv_external_clients_empty).visibility =
+                    if (clients.isEmpty()) View.VISIBLE else View.GONE
+                updateExternalEmptyState()
+            }
+        }
+    }
+
+    private fun observeExternalDetection() {
+        lifecycleScope.launch {
+            HotspotClientRegistry.detectionKnown.collect {
+                updateExternalEmptyState()
+            }
+        }
+    }
+
+    private fun updateExternalEmptyState() {
+        val empty = findViewById<TextView>(R.id.tv_external_clients_empty)
+        empty.setText(
+            if (HotspotClientRegistry.detectionKnown.value) {
+                R.string.external_clients_empty
+            } else {
+                R.string.external_clients_detection_unavailable
+            }
+        )
     }
 
     private fun confirmDisconnectClient(client: BleHotspotService.ConnectedClientSummary) {
@@ -308,12 +370,12 @@ class ServerActivity : AppCompatActivity(), ApprovalDialog.ApprovalListener, Rem
         try {
             val bluetoothManager = getSystemService(BLUETOOTH_SERVICE) as BluetoothManager
             val bluetoothAdapter = bluetoothManager.adapter
-            
+
             if (bluetoothAdapter == null) {
                 Toast.makeText(this, "Bluetooth not supported on this device", Toast.LENGTH_LONG).show()
                 return
             }
-            
+
             if (!bluetoothAdapter.isEnabled) {
                 Toast.makeText(this, "Please enable Bluetooth first", Toast.LENGTH_LONG).show()
                 val hasConnectPermission = ContextCompat.checkSelfPermission(
@@ -333,7 +395,7 @@ class ServerActivity : AppCompatActivity(), ApprovalDialog.ApprovalListener, Rem
             Toast.makeText(this, "Error checking Bluetooth: ${e.message}", Toast.LENGTH_LONG).show()
             return
         }
-        
+
         // Check Shizuku before starting
         try {
             ShizukuHelper.requestShizukuPermission(
@@ -384,15 +446,21 @@ class ServerActivity : AppCompatActivity(), ApprovalDialog.ApprovalListener, Rem
     }
 
     private fun stopSharing() {
-        val clients = connectedSnapshot
+        val easierspotClients = connectedSnapshot
+        val externalClients = externalSnapshot
+        val affected = buildList {
+            if (easierspotClients.isNotEmpty()) {
+                add("EasierSpot\n" + easierspotClients.joinToString("\n") { "• ${it.label}" })
+            }
+            if (externalClients.isNotEmpty()) {
+                add("External\n" + externalClients.joinToString("\n") { "• ${it.label}" })
+            }
+        }
         AlertDialog.Builder(this)
             .setTitle(R.string.stop_sharing_confirm_title)
             .setMessage(
-                if (clients.isEmpty()) getString(R.string.stop_sharing_no_clients)
-                else getString(
-                    R.string.stop_sharing_with_clients,
-                    clients.joinToString("\n") { "• ${it.label}" }
-                )
+                if (affected.isEmpty()) getString(R.string.stop_sharing_no_clients)
+                else getString(R.string.stop_sharing_with_clients, affected.joinToString("\n\n"))
             )
             .setNegativeButton(android.R.string.cancel, null)
             .setPositiveButton(R.string.stop_sharing) { _, _ -> performStopSharing() }
@@ -443,7 +511,7 @@ class ServerActivity : AppCompatActivity(), ApprovalDialog.ApprovalListener, Rem
 
     override fun onDeny(deviceAddress: String) {
         Toast.makeText(this, "Denied connection", Toast.LENGTH_SHORT).show()
-        
+
         // Notify service to deny client
         val denyIntent = Intent(this, BleHotspotService::class.java).apply {
             action = BleHotspotService.ACTION_DENY_CLIENT

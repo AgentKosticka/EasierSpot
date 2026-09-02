@@ -15,6 +15,19 @@ object WifiSuggestionInstaller {
 
     enum class ApprovalStatus { APPROVED, PENDING, REJECTED, UNKNOWN }
 
+    enum class PickerRepairResult {
+        MISSING,
+        ALREADY_PICKER_ELIGIBLE,
+        REPAIRED,
+        FAILED
+    }
+
+    data class PickerEntryState(
+        val installed: Boolean,
+        val manualSelectionSupported: Boolean,
+        val autojoinEnabled: Boolean
+    )
+
     sealed interface InstallResult {
         data object Installed : InstallResult
         data object AlreadyInstalled : InstallResult
@@ -40,9 +53,9 @@ object WifiSuggestionInstaller {
     ): InstallResult {
         val wifiManager = context.applicationContext.getSystemService(WifiManager::class.java)
         val suggestion = build(credentials, autojoinEnabled)
-        // Adding the same network is Android's in-place update path. Removing first can disconnect
-        // an active suggestion and also destroys the last known-good record if the replacement is
-        // rejected.
+        // Android 11+ supports in-place modification of an app's existing suggestion. Removing
+        // first can disconnect an active network and destroys the last known-good record if the
+        // replacement is rejected.
         val status = runCatching { wifiManager.addNetworkSuggestions(listOf(suggestion)) }
             .getOrElse {
                 LogUtils.w(TAG, "Could not install the EasierSpot network suggestion", it)
@@ -95,6 +108,69 @@ object WifiSuggestionInstaller {
     fun contains(context: Context, ssid: String): Boolean =
         ownedSuggestion(context, ssid) != null
 
+    /**
+     * Describes whether Android's durable copy of an EasierSpot suggestion can be selected from
+     * the stock Wi-Fi picker. Secure suggestions must explicitly share their app-owned credentials
+     * with the user; open networks are already manually selectable when they are visible in scans.
+     */
+    fun pickerEntryState(
+        context: Context,
+        ssid: String,
+        securityType: HotspotCredentials.SecurityType
+    ): PickerEntryState? {
+        val suggestion = ownedSuggestion(context, ssid) ?: return null
+        return PickerEntryState(
+            installed = true,
+            manualSelectionSupported = securityType == HotspotCredentials.SecurityType.OPEN ||
+                suggestion.isCredentialSharedWithUser,
+            autojoinEnabled = suggestion.isInitialAutojoinEnabled
+        )
+    }
+
+    /**
+     * Repairs suggestions created by older EasierSpot versions that did not expose their secure
+     * credentials to Android's Wi-Fi picker. Credentials are read only from Android's app-owned
+     * suggestion and are never copied into EasierSpot's database.
+     */
+    fun ensurePickerVisibility(
+        context: Context,
+        ssid: String,
+        securityType: HotspotCredentials.SecurityType,
+        isHidden: Boolean
+    ): PickerRepairResult {
+        val current = ownedSuggestion(context, ssid) ?: return PickerRepairResult.MISSING
+        if (securityType == HotspotCredentials.SecurityType.OPEN || current.isCredentialSharedWithUser) {
+            return PickerRepairResult.ALREADY_PICKER_ELIGIBLE
+        }
+        val credentials = runtimeCredentials(context, ssid, securityType, isHidden)
+            ?: return PickerRepairResult.FAILED
+        val result = installDetailed(
+            context,
+            credentials,
+            autojoinEnabled = current.isInitialAutojoinEnabled
+        )
+        if (!result.accepted) return PickerRepairResult.FAILED
+        val repaired = ownedSuggestion(context, ssid)?.isCredentialSharedWithUser == true
+        return if (repaired) PickerRepairResult.REPAIRED else PickerRepairResult.FAILED
+    }
+
+    /**
+     * Changes auto-join without deleting Android's app-owned suggestion. This keeps the network
+     * manually available in the Wi-Fi picker when EasierSpot is configured to connect via Shizuku.
+     */
+    fun setAutojoinForOwnedSuggestion(
+        context: Context,
+        ssid: String,
+        securityType: HotspotCredentials.SecurityType,
+        isHidden: Boolean,
+        enabled: Boolean
+    ): Boolean {
+        val current = ownedSuggestion(context, ssid) ?: return false
+        if (current.isInitialAutojoinEnabled == enabled) return true
+        val credentials = runtimeCredentials(context, ssid, securityType, isHidden) ?: return false
+        return installDetailed(context, credentials, enabled).accepted
+    }
+
     fun ensureAutojoin(
         context: Context,
         credentials: HotspotCredentials,
@@ -139,9 +215,8 @@ object WifiSuggestionInstaller {
             .setIsHiddenSsid(credentials.isHidden)
             .setIsInitialAutojoinEnabled(autojoinEnabled)
             .apply {
-                // Android rejects credential sharing for open networks. Secure EasierSpot
-                // suggestions are explicitly shareable so they can be selected manually once the
-                // AP is actually visible in Settings.
+                // Android's public API explicitly makes a secure suggestion selectable in the
+                // stock Wi-Fi picker when its credentials are shared with the user.
                 if (credentials.securityType != HotspotCredentials.SecurityType.OPEN) {
                     setCredentialSharedWithUser(true)
                 }

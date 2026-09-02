@@ -27,4 +27,42 @@ class SharedConnectivityPureLogicTest {
         assertNull(parseOverlayLookupValue("Error: resource not found"))
         assertNull(parseOverlayLookupBoolean("manufacturer-specific gibberish"))
     }
+
+    @Test
+    fun wifiPickerState_nativeProviderAlwaysWins() {
+        assertEquals(
+            SystemWifiPickerState.NATIVE_REMOTE_ENTRIES,
+            resolveSystemWifiPickerState(
+                nativeRemoteEntriesActive = true,
+                suggestionApprovalPending = false,
+                suggestionApprovalRejected = true,
+                trustedNetworkCount = 1,
+                pickerSelectableSuggestionCount = 0
+            )
+        )
+    }
+
+    @Test
+    fun wifiPickerState_tracksSuggestionFallbackLifecycle() {
+        assertEquals(
+            SystemWifiPickerState.SUGGESTION_READY,
+            resolveSystemWifiPickerState(false, false, false, 0, 0)
+        )
+        assertEquals(
+            SystemWifiPickerState.SUGGESTION_NEEDS_REFRESH,
+            resolveSystemWifiPickerState(false, false, false, 1, 0)
+        )
+        assertEquals(
+            SystemWifiPickerState.SUGGESTION_ACTIVE,
+            resolveSystemWifiPickerState(false, false, false, 1, 1)
+        )
+        assertEquals(
+            SystemWifiPickerState.SUGGESTION_APPROVAL_PENDING,
+            resolveSystemWifiPickerState(false, true, false, 1, 1)
+        )
+        assertEquals(
+            SystemWifiPickerState.SUGGESTION_APPROVAL_REJECTED,
+            resolveSystemWifiPickerState(false, false, true, 1, 1)
+        )
+    }
 }

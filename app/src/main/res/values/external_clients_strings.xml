@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="external_clients_title">External</string>
+    <string name="external_clients_empty">No external Wi-Fi devices connected.</string>
+    <string name="external_clients_detection_unavailable">External client detection unavailable · automatic hotspot shutdown is disabled.</string>
+    <string name="external_client_default_detail">Connected through hotspot</string>
+</resources>

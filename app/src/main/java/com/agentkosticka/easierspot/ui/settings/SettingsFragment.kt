@@ -2,6 +2,7 @@ package com.agentkosticka.easierspot.ui.settings
 
 import android.content.Intent
 import android.os.Bundle
+import android.provider.Settings
 import android.text.Html
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
@@ -15,9 +16,10 @@ import androidx.lifecycle.lifecycleScope
 import com.agentkosticka.easierspot.BuildConfig
 import com.agentkosticka.easierspot.R
 import com.agentkosticka.easierspot.ble.client.TrustedServerStore
+import com.agentkosticka.easierspot.data.model.HotspotCredentials
 import com.agentkosticka.easierspot.hotspot.WifiSuggestionInstaller
-import com.agentkosticka.easierspot.shared.SharedConnectivityActivation
-import com.agentkosticka.easierspot.shared.SharedConnectivityCapability
+import com.agentkosticka.easierspot.shared.SystemWifiPickerIntegration
+import com.agentkosticka.easierspot.shared.SystemWifiPickerState
 import com.agentkosticka.easierspot.ui.diagnostics.DiagnosticsActivity
 import com.agentkosticka.easierspot.ui.permissions.PermissionsActivity
 import com.agentkosticka.easierspot.service.BleClientService
@@ -58,7 +60,7 @@ class SettingsFragment : PreferenceFragmentCompat() {
                 updateThemeSummary(pref, newValue)
                 true
             }
-            
+
             // Initialize theme preference with current value
             val currentMode = ThemePreferences.getThemeMode(requireContext())
             val currentValue = when (currentMode) {
@@ -100,24 +102,39 @@ class SettingsFragment : PreferenceFragmentCompat() {
         val pref = findPreference<Preference>("system_wifi_picker_status") ?: return
         pref.summary = getString(R.string.pref_system_wifi_picker_checking)
         lifecycleScope.launch(Dispatchers.IO) {
-            val diagnostics = SharedConnectivityActivation.diagnostics(requireContext().applicationContext)
+            val diagnostics = SystemWifiPickerIntegration.diagnostics(
+                requireContext().applicationContext
+            )
             withContext(Dispatchers.Main) {
                 if (!isAdded) return@withContext
-                pref.summary = when (val capability = diagnostics.capability) {
-                    SharedConnectivityCapability.ApiUnavailable ->
-                        getString(R.string.pref_system_wifi_picker_unavailable)
-                    SharedConnectivityCapability.ProviderAlreadyConfigured,
-                    SharedConnectivityCapability.ProviderActivated ->
-                        getString(R.string.pref_system_wifi_picker_active)
-                    is SharedConnectivityCapability.Blocked ->
-                        getString(R.string.pref_system_wifi_picker_blocked, capability.reason)
+                pref.summary = when (diagnostics.state) {
+                    SystemWifiPickerState.NATIVE_REMOTE_ENTRIES ->
+                        getString(R.string.pref_system_wifi_picker_native_active)
+                    SystemWifiPickerState.SUGGESTION_ACTIVE ->
+                        getString(
+                            R.string.pref_system_wifi_picker_fallback_active,
+                            diagnostics.pickerSelectableSuggestionCount
+                        )
+                    SystemWifiPickerState.SUGGESTION_READY ->
+                        getString(R.string.pref_system_wifi_picker_fallback_ready)
+                    SystemWifiPickerState.SUGGESTION_NEEDS_REFRESH ->
+                        getString(R.string.pref_system_wifi_picker_fallback_refresh)
+                    SystemWifiPickerState.SUGGESTION_APPROVAL_PENDING ->
+                        getString(R.string.pref_system_wifi_picker_fallback_pending)
+                    SystemWifiPickerState.SUGGESTION_APPROVAL_REJECTED ->
+                        getString(R.string.pref_system_wifi_picker_fallback_rejected)
                 }
                 pref.setOnPreferenceClickListener {
-                    AlertDialog.Builder(requireContext())
+                    val dialog = AlertDialog.Builder(requireContext())
                         .setTitle(R.string.pref_system_wifi_picker_title)
                         .setMessage(diagnostics.report())
                         .setPositiveButton(android.R.string.ok, null)
-                        .show()
+                    if (diagnostics.state == SystemWifiPickerState.SUGGESTION_APPROVAL_REJECTED) {
+                        dialog.setNeutralButton(R.string.pref_system_wifi_picker_open_wifi_settings) { _, _ ->
+                            startActivity(Intent(Settings.ACTION_WIFI_SETTINGS))
+                        }
+                    }
+                    dialog.show()
                     true
                 }
             }
@@ -176,10 +193,19 @@ class SettingsFragment : PreferenceFragmentCompat() {
                     val app = requireContext().applicationContext
                     viewLifecycleOwner.lifecycleScope.launch(Dispatchers.IO) {
                         TrustedServerStore(app).all()
-                            .map { it.ssid }
-                            .filter { it.isNotBlank() }
-                            .distinct()
-                            .forEach { ssid -> WifiSuggestionInstaller.removeForSsid(app, ssid) }
+                            .distinctBy { it.ssid }
+                            .forEach { profile ->
+                                val securityType = runCatching {
+                                    HotspotCredentials.SecurityType.valueOf(profile.securityType)
+                                }.getOrDefault(HotspotCredentials.SecurityType.WPA2_PSK)
+                                WifiSuggestionInstaller.setAutojoinForOwnedSuggestion(
+                                    app,
+                                    profile.ssid,
+                                    securityType,
+                                    profile.isHidden,
+                                    enabled = false
+                                )
+                            }
                     }
                 }
                 updateWifiConnectionModeSummary(pref, mode)

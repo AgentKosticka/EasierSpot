@@ -6,10 +6,12 @@ import com.agentkosticka.easierspot.ui.settings.AppLanguageManager
 import com.agentkosticka.easierspot.ui.settings.ThemePreferences
 import com.agentkosticka.easierspot.util.LogUtils
 import com.agentkosticka.easierspot.ble.client.BleDiscoveryRegistrar
+import com.agentkosticka.easierspot.hotspot.HotspotClientRegistry
 import com.agentkosticka.easierspot.privileged.PrivilegedShellClient
 import com.agentkosticka.easierspot.privileged.ShizukuState
 import com.agentkosticka.easierspot.privileged.ShizukuStateMonitor
 import com.agentkosticka.easierspot.shared.SharedConnectivityBackends
+import com.agentkosticka.easierspot.shared.SystemWifiPickerIntegration
 import org.lsposed.hiddenapibypass.HiddenApiBypass
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -26,6 +28,7 @@ class EasierSpotApp : Application() {
         ThemePreferences.applyThemeMode(this)
         // Allow access to hidden APIs for tethering controls (Shizuku/ITetheringConnector).
         HiddenApiBypass.setHiddenApiExemptions("L")
+        HotspotClientRegistry.initialize(this)
         PrivilegedShellClient.initialize(this)
         ShizukuStateMonitor.initialize(this)
         UpdateCheckCoordinator.initialize(this)
@@ -33,6 +36,7 @@ class EasierSpotApp : Application() {
         appScope.launch {
             BleDiscoveryRegistrar.reconcile(this@EasierSpotApp)
             SharedConnectivityBackends.current.reconcile(this@EasierSpotApp)
+            SystemWifiPickerIntegration.reconcileSuggestions(this@EasierSpotApp)
         }
         appScope.launch {
             ShizukuStateMonitor.state.collect { state ->
