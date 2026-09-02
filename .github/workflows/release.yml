@@ -1,0 +1,174 @@
+name: Release APK
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Validate release tag
+        shell: bash
+        run: |
+          if [[ ! "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Release tags must use vX.Y.PATCH (received $GITHUB_REF_NAME)."
+            exit 1
+          fi
+
+      - name: Find successful CI artifact for this commit
+        id: ci
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          run_id="$(gh api \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "repos/${GITHUB_REPOSITORY}/actions/workflows/android.yml/runs?head_sha=${GITHUB_SHA}&status=success&event=push&per_page=20" \
+            --jq '.workflow_runs[0].id // empty')"
+          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+          if [[ -n "$run_id" ]]; then
+            echo "Found reusable Android quality-gates artifact from run $run_id."
+          else
+            echo "No reusable artifact is available; release will rebuild from the tag."
+          fi
+
+      - name: Reuse CI APK bundle
+        if: steps.ci.outputs.run_id != ''
+        id: download
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          name: android-build
+          path: dist
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ steps.ci.outputs.run_id }}
+
+      - name: Check reusable release artifact
+        id: reuse
+        shell: bash
+        run: |
+          if [[ -f dist/easierspot-release-unsigned.apk && -f dist/release-metadata.json ]]; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+            echo "Using the exact release APK produced by CI."
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            rm -rf dist
+            mkdir -p dist
+            echo "CI artifact is absent, expired, or incomplete; rebuilding from source."
+          fi
+
+      - name: Checkout release tag for fallback build
+        if: steps.reuse.outputs.found != 'true'
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Java for fallback build
+        if: steps.reuse.outputs.found != 'true'
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Validate Gradle wrapper for fallback build
+        if: steps.reuse.outputs.found != 'true'
+        uses: gradle/actions/wrapper-validation@v6
+
+      - name: Set up Gradle for fallback build
+        if: steps.reuse.outputs.found != 'true'
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Fallback release build
+        if: steps.reuse.outputs.found != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./gradlew --build-cache --parallel assembleRelease
+          cp app/build/outputs/apk/release/app-release-unsigned.apk dist/easierspot-release-unsigned.apk
+          cp app/build/outputs/apk/release/output-metadata.json dist/release-metadata.json
+
+      - name: Verify tag matches application version
+        shell: bash
+        run: |
+          set -euo pipefail
+          app_version="$(jq -r '.elements[0].versionName' dist/release-metadata.json)"
+          app_code="$(jq -r '.elements[0].versionCode' dist/release-metadata.json)"
+          if [[ "v${app_version}" != "$GITHUB_REF_NAME" ]]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match APK version v${app_version} (versionCode ${app_code})."
+            exit 1
+          fi
+          echo "Releasing v${app_version} (versionCode ${app_code})."
+
+      - name: Sign and verify APK
+        id: sign
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          for name in ANDROID_KEYSTORE_BASE64 ANDROID_KEY_ALIAS ANDROID_STORE_PASSWORD ANDROID_KEY_PASSWORD; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "::error::Missing required release secret: $name"
+              exit 1
+            fi
+          done
+
+          keystore="$RUNNER_TEMP/easierspot-release.keystore"
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$keystore"
+
+          build_tools="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)"
+          test -x "$build_tools/zipalign"
+          test -x "$build_tools/apksigner"
+
+          aligned="$RUNNER_TEMP/easierspot-release-aligned.apk"
+          output="dist/easier-hotspot-${GITHUB_REF_NAME}.apk"
+          "$build_tools/zipalign" -f -p 4 dist/easierspot-release-unsigned.apk "$aligned"
+          "$build_tools/apksigner" sign \
+            --ks "$keystore" \
+            --ks-key-alias "$ANDROID_KEY_ALIAS" \
+            --ks-pass env:ANDROID_STORE_PASSWORD \
+            --key-pass env:ANDROID_KEY_PASSWORD \
+            --out "$output" \
+            "$aligned"
+          "$build_tools/apksigner" verify --verbose --print-certs "$output"
+          sha256sum "$output" > "${output}.sha256"
+
+          echo "apk=$output" >> "$GITHUB_OUTPUT"
+          echo "checksum=${output}.sha256" >> "$GITHUB_OUTPUT"
+          rm -f "$keystore" "$aligned"
+
+      - name: Create or update GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APK: ${{ steps.sign.outputs.apk }}
+          CHECKSUM: ${{ steps.sign.outputs.checksum }}
+        run: |
+          set -euo pipefail
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "$APK" "$CHECKSUM" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              "$APK" "$CHECKSUM" \
+              --verify-tag \
+              --generate-notes \
+              --title "Stable $GITHUB_REF_NAME"
+          fi
