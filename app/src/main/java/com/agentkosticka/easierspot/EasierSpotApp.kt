@@ -10,6 +10,7 @@ import com.agentkosticka.easierspot.privileged.PrivilegedShellClient
 import com.agentkosticka.easierspot.privileged.ShizukuState
 import com.agentkosticka.easierspot.privileged.ShizukuStateMonitor
 import com.agentkosticka.easierspot.shared.SharedConnectivityBackends
+import com.agentkosticka.easierspot.shared.SystemWifiPickerIntegration
 import org.lsposed.hiddenapibypass.HiddenApiBypass
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -33,6 +34,7 @@ class EasierSpotApp : Application() {
         appScope.launch {
             BleDiscoveryRegistrar.reconcile(this@EasierSpotApp)
             SharedConnectivityBackends.current.reconcile(this@EasierSpotApp)
+            SystemWifiPickerIntegration.reconcile(this@EasierSpotApp)
         }
         appScope.launch {
             ShizukuStateMonitor.state.collect { state ->
