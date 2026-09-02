@@ -10,13 +10,14 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.net.DatagramPacket
 import java.net.DatagramSocket
+import java.net.InetAddress
 import java.net.SocketTimeoutException
 import java.security.MessageDigest
 
 /** Listens only while the server owns or observes an active hotspot. */
 class UdpControlServer(
     private val peers: WakePeerStore,
-    private val onAuthenticated: (fingerprint: String, type: Byte) -> Unit
+    private val onAuthenticated: (fingerprint: String, type: Byte, sourceAddress: InetAddress) -> Unit
 ) {
     companion object { private const val TAG = "UdpControlServer" }
 
@@ -67,7 +68,9 @@ class UdpControlServer(
                         Triple(peer, request, ack)
                     } ?: continue
                     val (peer, request, ack) = accepted
-                    if (request.counter > peer.lastCounter) onAuthenticated(peer.fingerprint, request.type)
+                    if (request.counter > peer.lastCounter) {
+                        onAuthenticated(peer.fingerprint, request.type, datagram.address)
+                    }
                     activeSocket.send(DatagramPacket(ack, ack.size, datagram.address, datagram.port))
                 }
             } finally {
