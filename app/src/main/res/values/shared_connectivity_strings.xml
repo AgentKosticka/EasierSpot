@@ -1,8 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="pref_system_wifi_picker_title">System Wi-Fi picker integration</string>
-    <string name="pref_system_wifi_picker_checking">Checking Android provider configuration…</string>
-    <string name="pref_system_wifi_picker_active">Active · tap for provider details</string>
-    <string name="pref_system_wifi_picker_unavailable">Unavailable on Android 12–13 · nearby notification is used instead</string>
-    <string name="pref_system_wifi_picker_blocked">Blocked by system provider configuration · using nearby notification instead\n%1$s</string>
+    <string name="pref_system_wifi_picker_checking">Checking Android Wi-Fi picker paths…</string>
+    <string name="pref_system_wifi_picker_native_active">Native remote hotspot entries active · tap for details</string>
+    <string name="pref_system_wifi_picker_fallback_active">Android Wi-Fi picker fallback active · %1$d saved network(s)</string>
+    <string name="pref_system_wifi_picker_fallback_ready">Ready · paired hotspots will be added to Android’s Wi-Fi picker</string>
+    <string name="pref_system_wifi_picker_fallback_refresh">Reconnect once to refresh the saved Android Wi-Fi picker entry</string>
+    <string name="pref_system_wifi_picker_fallback_pending">Waiting for Android to approve EasierSpot network suggestions</string>
+    <string name="pref_system_wifi_picker_fallback_rejected">Wi-Fi picker access needs approval · tap to repair</string>
+    <string name="pref_system_wifi_picker_open_wifi_settings">Open Wi-Fi settings</string>
 </resources>
