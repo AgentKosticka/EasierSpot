@@ -16,6 +16,7 @@ import androidx.lifecycle.lifecycleScope
 import com.agentkosticka.easierspot.BuildConfig
 import com.agentkosticka.easierspot.R
 import com.agentkosticka.easierspot.ble.client.TrustedServerStore
+import com.agentkosticka.easierspot.data.model.HotspotCredentials
 import com.agentkosticka.easierspot.hotspot.WifiSuggestionInstaller
 import com.agentkosticka.easierspot.shared.SystemWifiPickerIntegration
 import com.agentkosticka.easierspot.shared.SystemWifiPickerState
@@ -192,10 +193,19 @@ class SettingsFragment : PreferenceFragmentCompat() {
                     val app = requireContext().applicationContext
                     viewLifecycleOwner.lifecycleScope.launch(Dispatchers.IO) {
                         TrustedServerStore(app).all()
-                            .map { it.ssid }
-                            .filter { it.isNotBlank() }
-                            .distinct()
-                            .forEach { ssid -> WifiSuggestionInstaller.removeForSsid(app, ssid) }
+                            .distinctBy { it.ssid }
+                            .forEach { profile ->
+                                val securityType = runCatching {
+                                    HotspotCredentials.SecurityType.valueOf(profile.securityType)
+                                }.getOrDefault(HotspotCredentials.SecurityType.WPA2_PSK)
+                                WifiSuggestionInstaller.setAutojoinForOwnedSuggestion(
+                                    app,
+                                    profile.ssid,
+                                    securityType,
+                                    profile.isHidden,
+                                    enabled = false
+                                )
+                            }
                     }
                 }
                 updateWifiConnectionModeSummary(pref, mode)
