@@ -2,36 +2,110 @@ name: Android quality gates
 
 on:
   push:
+    branches:
+      - master
   pull_request:
+    branches:
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-quality-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Java
+        uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: "21"
-          cache: gradle
-      - uses: gradle/actions/setup-gradle@v4
-      - name: Unit tests, lint, and debug APK
-        run: ./gradlew testDebugUnitTest lintDebug assembleDebug
+
+      - name: Validate Gradle wrapper
+        uses: gradle/actions/wrapper-validation@v6
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-read-only: ${{ github.ref != 'refs/heads/master' }}
+
+      - name: Unit tests, lint, and APKs
+        shell: bash
+        run: |
+          tasks=(testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest)
+          if [[ "$GITHUB_REF" == "refs/heads/master" ]]; then
+            tasks+=(assembleRelease)
+          fi
+          ./gradlew --build-cache --parallel "${tasks[@]}"
+
+      - name: Stage reusable build artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ci-artifacts
+
+          debug_apk="$(find app/build/outputs/apk/debug -maxdepth 1 -type f -name '*.apk' -print -quit)"
+          test_apk="$(find app/build/outputs/apk/androidTest/debug -maxdepth 1 -type f -name '*.apk' -print -quit)"
+          test -n "$debug_apk"
+          test -n "$test_apk"
+
+          cp "$debug_apk" ci-artifacts/easierspot-debug.apk
+          cp "$test_apk" ci-artifacts/easierspot-androidTest.apk
+          cp app/build/outputs/apk/debug/output-metadata.json ci-artifacts/debug-metadata.json
+
+          if [[ -f app/build/outputs/apk/release/app-release-unsigned.apk ]]; then
+            cp app/build/outputs/apk/release/app-release-unsigned.apk ci-artifacts/easierspot-release-unsigned.apk
+            cp app/build/outputs/apk/release/output-metadata.json ci-artifacts/release-metadata.json
+          fi
+
+          version_name="$(jq -r '.elements[0].versionName' ci-artifacts/debug-metadata.json)"
+          version_code="$(jq -r '.elements[0].versionCode' ci-artifacts/debug-metadata.json)"
+          {
+            echo "### Android build"
+            echo "Built **v${version_name}** (versionCode **${version_code}**)."
+            echo "The same APK/test-APK artifact is reused by instrumentation; master builds also include the unsigned release APK for the release workflow."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload reusable APK bundle
+        uses: actions/upload-artifact@v7
+        with:
+          name: android-build
+          path: ci-artifacts/
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
 
   instrumentation:
+    needs: build
     runs-on: macos-15-intel
-    timeout-minutes: 30
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - name: Set up Java for Android SDK tools
+        uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: "21"
-          cache: gradle
-      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Download APKs built on Linux
+        uses: actions/download-artifact@v8
+        with:
+          name: android-build
+          path: ci-artifacts
+
       - name: Instrumentation tests
-        uses: reactivecircus/android-emulator-runner@v2
+        uses: reactivecircus/android-emulator-runner@v2.38.0
         with:
           api-level: 31
           target: default
@@ -41,4 +115,7 @@ jobs:
           ram-size: 2048M
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none -no-metrics
           disable-animations: true
-          script: ./gradlew connectedDebugAndroidTest
+          script: |
+            adb install -r ci-artifacts/easierspot-debug.apk
+            adb install -r ci-artifacts/easierspot-androidTest.apk
+            adb shell am instrument -w -r com.agentkosticka.easierspot.test/androidx.test.runner.AndroidJUnitRunner
