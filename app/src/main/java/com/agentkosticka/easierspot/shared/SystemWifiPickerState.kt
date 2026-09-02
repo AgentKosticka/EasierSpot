@@ -14,9 +14,11 @@ internal fun resolveSystemWifiPickerState(
     suggestionApprovalPending: Boolean,
     suggestionApprovalRejected: Boolean,
     trustedNetworkCount: Int,
-    pickerSelectableSuggestionCount: Int
+    pickerSelectableSuggestionCount: Int,
+    companionConfigured: Boolean = false
 ): SystemWifiPickerState = when {
     nativeRemoteEntriesActive -> SystemWifiPickerState.NATIVE_REMOTE_ENTRIES
+    companionConfigured -> SystemWifiPickerState.SUGGESTION_ACTIVE
     suggestionApprovalRejected -> SystemWifiPickerState.SUGGESTION_APPROVAL_REJECTED
     suggestionApprovalPending -> SystemWifiPickerState.SUGGESTION_APPROVAL_PENDING
     pickerSelectableSuggestionCount > 0 -> SystemWifiPickerState.SUGGESTION_ACTIVE

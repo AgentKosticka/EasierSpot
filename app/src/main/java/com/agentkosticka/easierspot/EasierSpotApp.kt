@@ -42,6 +42,9 @@ class EasierSpotApp : Application() {
             ShizukuStateMonitor.state.collect { state ->
                 if (state == ShizukuState.READY) {
                     SharedConnectivityBackends.current.reconcile(this@EasierSpotApp)
+                    // If Android cannot select us as the hidden Shared Connectivity provider,
+                    // Shizuku can still enable the scoped Wi-Fi picker companion automatically.
+                    SystemWifiPickerIntegration.reconcileSuggestions(this@EasierSpotApp)
                 }
             }
         }

@@ -8,13 +8,13 @@ import com.agentkosticka.easierspot.util.LogUtils
 import java.util.Locale
 
 /**
- * Reconciles both Android paths that can surface EasierSpot networks in Settings.
+ * Reconciles every path EasierSpot can use to surface a server from Android Wi-Fi Settings.
  *
- * Shared Connectivity supplies virtual remote hotspot entries, but Android selects that provider
- * through framework/OEM resources. A normal third-party app cannot replace a provider such as GMS.
- * WifiNetworkSuggestion is the supported public fallback: secure EasierSpot suggestions explicitly
- * share their credentials with the user so Android can surface them in the stock Wi-Fi picker once
- * the hotspot is actually visible.
+ * Native Shared Connectivity is preferred because it creates true framework HotspotNetwork rows.
+ * On devices where Android has selected another provider, the picker companion supplies BLE-backed
+ * virtual rows even while the physical AP is off. WifiNetworkSuggestion remains the final public
+ * fallback for the real AP after it becomes scan-visible; Android never displays suggestions as
+ * offline rows.
  */
 object SystemWifiPickerIntegration {
     private const val TAG = "SystemWifiPicker"
@@ -30,6 +30,7 @@ object SystemWifiPickerIntegration {
     data class Diagnostics(
         val state: SystemWifiPickerState,
         val native: SharedConnectivityActivation.Diagnostics,
+        val companion: WifiPickerCompanionDiagnostics,
         val suggestionApproval: WifiSuggestionInstaller.ApprovalStatus,
         val trustedNetworkCount: Int,
         val installedSuggestionCount: Int,
@@ -38,10 +39,13 @@ object SystemWifiPickerIntegration {
     ) {
         fun report(): String = buildString {
             appendLine("Picker integration mode: ${SystemWifiPickerIntegration.stateLabel(state)}")
+            appendLine("Nearby/offline picker companion: ${companion.activation.name.lowercase(Locale.ROOT)}")
+            appendLine("Picker companion configured: ${companion.configured}")
+            appendLine("Picker companion detail: ${companion.detail}")
             appendLine("Network suggestion approval: ${suggestionApproval.name.lowercase(Locale.ROOT)}")
             appendLine("Trusted EasierSpot networks: $trustedNetworkCount")
             appendLine("Android-owned EasierSpot suggestions: $installedSuggestionCount")
-            appendLine("Picker-selectable EasierSpot suggestions: $pickerSelectableSuggestionCount")
+            appendLine("Visible-AP picker suggestions: $pickerSelectableSuggestionCount")
             appendLine("Picker suggestions repaired this check: $repairedSuggestionCount")
             appendLine()
             appendLine("Native remote entries (Shared Connectivity)")
@@ -50,39 +54,48 @@ object SystemWifiPickerIntegration {
                 appendLine()
                 appendLine()
                 append(
-                    "Android only allows virtual/offline hotspot entries from the framework-selected " +
-                        "Shared Connectivity provider. EasierSpot therefore uses Android network " +
-                        "suggestions as the stock-picker fallback; those entries become selectable " +
-                        "when the hotspot is visible."
+                    "Android Wi-Fi suggestions require a matching scan result and therefore cannot " +
+                        "represent a hotspot that is still off. EasierSpot uses its Wi-Fi picker " +
+                        "companion to show recently advertising paired servers before hotspot " +
+                        "startup. Shizuku can enable that companion automatically; without Shizuku " +
+                        "enable ‘EasierSpot Wi-Fi picker’ in Android Accessibility settings. The " +
+                        "service observes Settings window changes only and does not read screen content."
                 )
             }
         }
     }
 
-    /**
-     * Startup path: repair and account for app-owned suggestions only. Native Shared Connectivity
-     * reconciliation is intentionally left to [SharedConnectivityBackends] so startup never repeats
-     * overlay/shell activation work just to populate diagnostics.
-     */
+    /** Runs off main: Room/WifiManager reconciliation plus optional Shizuku secure-settings setup. */
     fun reconcileSuggestions(context: Context) {
-        reconcileSuggestionSnapshot(context.applicationContext)
+        val app = context.applicationContext
+        val suggestions = reconcileSuggestionSnapshot(app)
+        WifiPickerCompanionController.reconcile(
+            app,
+            needed = suggestions.trustedNetworkCount > 0
+        )
     }
 
-    /** Full diagnostics are computed on demand from Settings, where native framework detail matters. */
+    /** Full diagnostics are computed on demand from Settings, where framework detail matters. */
     fun diagnostics(context: Context): Diagnostics {
         val app = context.applicationContext
         val suggestions = reconcileSuggestionSnapshot(app)
         val native = SharedConnectivityActivation.diagnostics(app)
+        val companion = WifiPickerCompanionController.reconcile(
+            app,
+            needed = suggestions.trustedNetworkCount > 0
+        )
         val state = resolveSystemWifiPickerState(
             nativeRemoteEntriesActive = native.capability.isActive,
             suggestionApprovalPending = suggestions.approval == WifiSuggestionInstaller.ApprovalStatus.PENDING,
             suggestionApprovalRejected = suggestions.approval == WifiSuggestionInstaller.ApprovalStatus.REJECTED,
             trustedNetworkCount = suggestions.trustedNetworkCount,
-            pickerSelectableSuggestionCount = suggestions.pickerSelectableSuggestionCount
+            pickerSelectableSuggestionCount = suggestions.pickerSelectableSuggestionCount,
+            companionConfigured = companion.configured
         )
         return Diagnostics(
             state = state,
             native = native,
+            companion = companion,
             suggestionApproval = suggestions.approval,
             trustedNetworkCount = suggestions.trustedNetworkCount,
             installedSuggestionCount = suggestions.installedSuggestionCount,
@@ -91,7 +104,6 @@ object SystemWifiPickerIntegration {
         )
     }
 
-    /** Runs off main because it reads Room, WifiManager state, and may repair Android suggestions. */
     private fun reconcileSuggestionSnapshot(context: Context): SuggestionSnapshot {
         val profiles = TrustedServerStore(context).all().distinctBy { it.ssid }
         var repaired = 0
@@ -135,9 +147,9 @@ object SystemWifiPickerIntegration {
 
     private fun stateLabel(state: SystemWifiPickerState): String = when (state) {
         SystemWifiPickerState.NATIVE_REMOTE_ENTRIES -> "native remote entries active"
-        SystemWifiPickerState.SUGGESTION_ACTIVE -> "Android Wi-Fi picker fallback active"
-        SystemWifiPickerState.SUGGESTION_READY -> "Android Wi-Fi picker fallback ready"
-        SystemWifiPickerState.SUGGESTION_NEEDS_REFRESH -> "saved picker entry needs credential refresh"
+        SystemWifiPickerState.SUGGESTION_ACTIVE -> "picker companion / visible-hotspot fallback active"
+        SystemWifiPickerState.SUGGESTION_READY -> "visible-hotspot suggestion fallback ready"
+        SystemWifiPickerState.SUGGESTION_NEEDS_REFRESH -> "offline picker companion needs setup"
         SystemWifiPickerState.SUGGESTION_APPROVAL_PENDING -> "waiting for Android suggestion approval"
         SystemWifiPickerState.SUGGESTION_APPROVAL_REJECTED -> "Android suggestion access rejected"
     }

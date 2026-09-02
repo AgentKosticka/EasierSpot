@@ -3,10 +3,21 @@
     <string name="pref_system_wifi_picker_title">System Wi-Fi picker integration</string>
     <string name="pref_system_wifi_picker_checking">Checking Android Wi-Fi picker paths…</string>
     <string name="pref_system_wifi_picker_native_active">Native remote hotspot entries active · tap for details</string>
-    <string name="pref_system_wifi_picker_fallback_active">Android Wi-Fi picker fallback active · %1$d saved network(s)</string>
-    <string name="pref_system_wifi_picker_fallback_ready">Ready · paired hotspots will be added to Android’s Wi-Fi picker</string>
-    <string name="pref_system_wifi_picker_fallback_refresh">Reconnect once to refresh the saved Android Wi-Fi picker entry</string>
+    <string name="pref_system_wifi_picker_fallback_active">EasierSpot picker fallback active · %1$d saved AP fallback(s)</string>
+    <string name="pref_system_wifi_picker_fallback_ready">Ready · paired hotspots will be saved when first connected</string>
+    <string name="pref_system_wifi_picker_fallback_refresh">Offline picker entries need Accessibility setup · tap for details</string>
     <string name="pref_system_wifi_picker_fallback_pending">Waiting for Android to approve EasierSpot network suggestions</string>
-    <string name="pref_system_wifi_picker_fallback_rejected">Wi-Fi picker access needs approval · tap to repair</string>
+    <string name="pref_system_wifi_picker_fallback_rejected">Wi-Fi suggestion access needs approval · tap to repair</string>
     <string name="pref_system_wifi_picker_open_wifi_settings">Open Wi-Fi settings</string>
+    <string name="pref_system_wifi_picker_manual_title">Offline picker fallback</string>
+    <string name="pref_system_wifi_picker_manual_summary">Without Shizuku: enable EasierSpot Wi-Fi picker in Accessibility settings</string>
+
+    <string name="wifi_picker_accessibility_label">EasierSpot Wi-Fi picker</string>
+    <string name="wifi_picker_accessibility_summary">Nearby EasierSpot servers in Wi-Fi Settings</string>
+    <string name="wifi_picker_accessibility_description">Shows nearby paired EasierSpot servers in Android’s Wi-Fi picker before their hotspot is turned on. The service only observes Settings window changes and does not read screen content.</string>
+    <string name="wifi_picker_companion_header">EASIERSPOT NEARBY</string>
+    <string name="wifi_picker_companion_offline">Server nearby · tap to turn on its hotspot and connect</string>
+    <string name="wifi_picker_companion_ready">Hotspot ready · tap to connect</string>
+    <string name="wifi_picker_companion_connecting">Connecting to %1$s…</string>
+    <string name="wifi_picker_companion_more">+%1$d more nearby</string>
 </resources>
