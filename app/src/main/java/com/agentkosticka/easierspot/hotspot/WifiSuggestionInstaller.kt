@@ -53,9 +53,9 @@ object WifiSuggestionInstaller {
     ): InstallResult {
         val wifiManager = context.applicationContext.getSystemService(WifiManager::class.java)
         val suggestion = build(credentials, autojoinEnabled)
-        // Adding the same network is Android's in-place update path. Removing first can disconnect
-        // an active suggestion and also destroys the last known-good record if the replacement is
-        // rejected.
+        // Android 11+ supports in-place modification of an app's existing suggestion. Removing
+        // first can disconnect an active network and destroys the last known-good record if the
+        // replacement is rejected.
         val status = runCatching { wifiManager.addNetworkSuggestions(listOf(suggestion)) }
             .getOrElse {
                 LogUtils.w(TAG, "Could not install the EasierSpot network suggestion", it)
@@ -152,6 +152,23 @@ object WifiSuggestionInstaller {
         if (!result.accepted) return PickerRepairResult.FAILED
         val repaired = ownedSuggestion(context, ssid)?.isCredentialSharedWithUser == true
         return if (repaired) PickerRepairResult.REPAIRED else PickerRepairResult.FAILED
+    }
+
+    /**
+     * Changes auto-join without deleting Android's app-owned suggestion. This keeps the network
+     * manually available in the Wi-Fi picker when EasierSpot is configured to connect via Shizuku.
+     */
+    fun setAutojoinForOwnedSuggestion(
+        context: Context,
+        ssid: String,
+        securityType: HotspotCredentials.SecurityType,
+        isHidden: Boolean,
+        enabled: Boolean
+    ): Boolean {
+        val current = ownedSuggestion(context, ssid) ?: return false
+        if (current.isInitialAutojoinEnabled == enabled) return true
+        val credentials = runtimeCredentials(context, ssid, securityType, isHidden) ?: return false
+        return installDetailed(context, credentials, enabled).accepted
     }
 
     fun ensureAutojoin(
