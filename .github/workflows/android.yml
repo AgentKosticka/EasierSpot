@@ -89,10 +89,8 @@ jobs:
 
   instrumentation:
     needs: build
-    runs-on: macos-15-intel
-    timeout-minutes: 20
-    env:
-      EASIERSPOT_EMULATOR_BUILD: "15917651"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
     steps:
       - name: Set up Java for Android SDK tools
         uses: actions/setup-java@v6
@@ -106,29 +104,40 @@ jobs:
           name: android-build
           path: ci-artifacts
 
-      - name: Restore API 31 emulator snapshot
+      - name: Enable KVM
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          test -e /dev/kvm
+          test -r /dev/kvm
+          test -w /dev/kvm
+
+      - name: Restore API 34 ATD snapshot
         id: avd-cache
         uses: actions/cache@v6
         with:
           path: |
             ~/.android/avd/*
             ~/.android/adb*
-          key: macos-intel-avd-api31-default-x86_64-${{ env.EASIERSPOT_EMULATOR_BUILD }}-v1
+            ~/.android/debug.keystore
+          key: ubuntu24-avd-api34-aosp_atd-x86_64-v1
 
-      - name: Instrumentation tests from cached emulator
+      - name: Instrumentation tests from cached ATD
         id: cached-emulator
         if: steps.avd-cache.outputs.cache-hit == 'true'
         continue-on-error: true
         uses: reactivecircus/android-emulator-runner@v2.38.0
         with:
-          api-level: 31
-          target: default
+          api-level: 34
+          target: aosp_atd
           arch: x86_64
           profile: Galaxy Nexus
           cores: 2
           ram-size: 2048M
-          emulator-build: ${{ env.EASIERSPOT_EMULATOR_BUILD }}
-          emulator-boot-timeout: 420
+          emulator-boot-timeout: 300
           force-avd-creation: false
           emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -no-metrics
           disable-animations: true
@@ -137,18 +146,17 @@ jobs:
             adb install -r ci-artifacts/easierspot-androidTest.apk
             adb shell am instrument -w -r com.agentkosticka.easierspot.test/androidx.test.runner.AndroidJUnitRunner
 
-      - name: Cold emulator fallback and snapshot seed
+      - name: Cold ATD fallback and snapshot seed
         if: steps.avd-cache.outputs.cache-hit != 'true' || steps.cached-emulator.outcome != 'success'
         uses: reactivecircus/android-emulator-runner@v2.38.0
         with:
-          api-level: 31
-          target: default
+          api-level: 34
+          target: aosp_atd
           arch: x86_64
           profile: Galaxy Nexus
           cores: 2
           ram-size: 2048M
-          emulator-build: ${{ env.EASIERSPOT_EMULATOR_BUILD }}
-          emulator-boot-timeout: 420
+          emulator-boot-timeout: 300
           force-avd-creation: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -no-metrics
           disable-animations: true
