@@ -84,10 +84,33 @@
             <ListView
                 android:id="@+id/list_connected_clients"
                 android:layout_width="match_parent"
-                android:layout_height="120dp"
+                android:layout_height="96dp"
                 android:visibility="gone"
                 android:dividerHeight="0.5dp"
-                android:layout_marginBottom="18dp" />
+                android:layout_marginBottom="14dp" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/external_clients_title"
+                android:textSize="18sp"
+                android:textStyle="bold"
+                android:layout_marginBottom="4dp" />
+
+            <TextView
+                android:id="@+id/tv_external_clients_empty"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/external_clients_empty"
+                android:layout_marginBottom="8dp" />
+
+            <ListView
+                android:id="@+id/list_external_clients"
+                android:layout_width="match_parent"
+                android:layout_height="96dp"
+                android:visibility="gone"
+                android:dividerHeight="0.5dp"
+                android:layout_marginBottom="14dp" />
 
             <TextView
                 android:layout_width="match_parent"
