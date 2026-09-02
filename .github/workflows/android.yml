@@ -91,6 +91,8 @@ jobs:
     needs: build
     runs-on: macos-15-intel
     timeout-minutes: 20
+    env:
+      EASIERSPOT_EMULATOR_BUILD: "15917651"
     steps:
       - name: Set up Java for Android SDK tools
         uses: actions/setup-java@v6
@@ -104,7 +106,19 @@ jobs:
           name: android-build
           path: ci-artifacts
 
-      - name: Instrumentation tests
+      - name: Restore API 31 emulator snapshot
+        id: avd-cache
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.android/avd/*
+            ~/.android/adb*
+          key: macos-intel-avd-api31-default-x86_64-${{ env.EASIERSPOT_EMULATOR_BUILD }}-v1
+
+      - name: Instrumentation tests from cached emulator
+        id: cached-emulator
+        if: steps.avd-cache.outputs.cache-hit == 'true'
+        continue-on-error: true
         uses: reactivecircus/android-emulator-runner@v2.38.0
         with:
           api-level: 31
@@ -113,7 +127,30 @@ jobs:
           profile: Galaxy Nexus
           cores: 2
           ram-size: 2048M
-          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none -no-metrics
+          emulator-build: ${{ env.EASIERSPOT_EMULATOR_BUILD }}
+          emulator-boot-timeout: 420
+          force-avd-creation: false
+          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -no-metrics
+          disable-animations: true
+          script: |
+            adb install -r ci-artifacts/easierspot-debug.apk
+            adb install -r ci-artifacts/easierspot-androidTest.apk
+            adb shell am instrument -w -r com.agentkosticka.easierspot.test/androidx.test.runner.AndroidJUnitRunner
+
+      - name: Cold emulator fallback and snapshot seed
+        if: steps.avd-cache.outputs.cache-hit != 'true' || steps.cached-emulator.outcome != 'success'
+        uses: reactivecircus/android-emulator-runner@v2.38.0
+        with:
+          api-level: 31
+          target: default
+          arch: x86_64
+          profile: Galaxy Nexus
+          cores: 2
+          ram-size: 2048M
+          emulator-build: ${{ env.EASIERSPOT_EMULATOR_BUILD }}
+          emulator-boot-timeout: 420
+          force-avd-creation: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -no-metrics
           disable-animations: true
           script: |
             adb install -r ci-artifacts/easierspot-debug.apk
