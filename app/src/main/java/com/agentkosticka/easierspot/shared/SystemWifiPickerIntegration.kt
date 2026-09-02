@@ -28,7 +28,7 @@ object SystemWifiPickerIntegration {
         val repairedSuggestionCount: Int
     ) {
         fun report(): String = buildString {
-            appendLine("Picker integration mode: ${stateLabel(state)}")
+            appendLine("Picker integration mode: ${SystemWifiPickerIntegration.stateLabel(state)}")
             appendLine("Network suggestion approval: ${suggestionApproval.name.lowercase()}")
             appendLine("Trusted EasierSpot networks: $trustedNetworkCount")
             appendLine("Android-owned EasierSpot suggestions: $installedSuggestionCount")
