@@ -13,8 +13,10 @@ interface SharedConnectivityBackend {
 
 private object NoopSharedConnectivityBackend : SharedConnectivityBackend {
     override fun reconcile(context: Context) = SharedConnectivityCapability.ApiUnavailable
-    override fun onPresenceChanged(context: Context) = Unit
-    override fun onConnectionStateChanged(state: ClientConnectionState) = Unit
+    override fun onPresenceChanged(context: Context) =
+        WifiPickerCompanionController.onPresenceChanged(context)
+    override fun onConnectionStateChanged(state: ClientConnectionState) =
+        WifiPickerCompanionBridge.requestRefresh()
     override fun capability() = SharedConnectivityCapability.ApiUnavailable
 }
 
@@ -25,9 +27,16 @@ private object PlatformSharedConnectivityBackend : SharedConnectivityBackend {
         return capability
     }
 
-    override fun onPresenceChanged(context: Context) = SharedConnectivityPublisher.onPresenceChanged(context)
-    override fun onConnectionStateChanged(state: ClientConnectionState) =
+    override fun onPresenceChanged(context: Context) {
+        SharedConnectivityPublisher.onPresenceChanged(context)
+        WifiPickerCompanionController.onPresenceChanged(context)
+    }
+
+    override fun onConnectionStateChanged(state: ClientConnectionState) {
         SharedConnectivityPublisher.onConnectionStateChanged(state)
+        WifiPickerCompanionBridge.requestRefresh()
+    }
+
     override fun capability(): SharedConnectivityCapability = SharedConnectivityActivation.capability()
 }
 

@@ -58,6 +58,13 @@
             app:title="@string/pref_system_wifi_picker_title"
             app:summary="@string/pref_system_wifi_picker_checking" />
 
+        <Preference
+            app:key="system_wifi_picker_manual_setup"
+            app:title="@string/pref_system_wifi_picker_manual_title"
+            app:summary="@string/pref_system_wifi_picker_manual_summary">
+            <intent android:action="android.settings.ACCESSIBILITY_SETTINGS" />
+        </Preference>
+
     </PreferenceCategory>
 
     <!-- Server Mode Category -->
