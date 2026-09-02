@@ -99,6 +99,7 @@ jobs:
         run: |
           set -euo pipefail
           ./gradlew --build-cache --parallel assembleRelease
+          mkdir -p dist
           cp app/build/outputs/apk/release/app-release-unsigned.apk dist/easierspot-release-unsigned.apk
           cp app/build/outputs/apk/release/output-metadata.json dist/release-metadata.json
 
