@@ -19,3 +19,8 @@ android {
         targetCompatibility = JavaVersion.VERSION_11
     }
 }
+
+dependencies {
+    compileOnly(libs.androidx.annotation)
+    compileOnly(libs.annotation)
+}
