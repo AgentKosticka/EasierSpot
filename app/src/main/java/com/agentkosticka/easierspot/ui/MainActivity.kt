@@ -25,6 +25,7 @@ import com.agentkosticka.easierspot.ui.server.ShizukuHelper
 import com.agentkosticka.easierspot.ui.server.ServerActivity
 import com.agentkosticka.easierspot.ui.settings.AppPreferences
 import com.agentkosticka.easierspot.ble.client.TrustedServerStore
+import com.agentkosticka.easierspot.hotspot.HotspotClientRegistry
 import com.agentkosticka.easierspot.service.BleClientService
 import com.agentkosticka.easierspot.service.BleHotspotService
 import com.agentkosticka.easierspot.service.ClientConnectionState
@@ -47,6 +48,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var setupHealth: TextView
     private lateinit var serverButton: android.widget.Button
     private var connectedClients: List<BleHotspotService.ConnectedClientSummary> = emptyList()
+    private var externalClients: List<HotspotClientRegistry.ExternalClientSummary> = emptyList()
     private val updateStateListener: (UpdateChecker.State) -> Unit = { state ->
         runOnUiThread { renderUpdateBanner(state) }
     }
@@ -107,14 +109,21 @@ class MainActivity : AppCompatActivity() {
         }
         mainScope.launch {
             BleHotspotService.connectedClients.collect { clients ->
-                connectedClients = clients
-                if (clients.isNotEmpty()) {
+                connectedClients = clients.filterNot { client ->
+                    HotspotClientRegistry.isExternalLifecycleLease(client.stableId)
+                }
+                if (connectedClients.isNotEmpty()) {
                     serverStatus.text = resources.getQuantityString(
                         R.plurals.dashboard_server_connected_clients,
-                        clients.size,
-                        clients.size
+                        connectedClients.size,
+                        connectedClients.size
                     )
                 }
+            }
+        }
+        mainScope.launch {
+            HotspotClientRegistry.externalClients.collect { clients ->
+                externalClients = clients
             }
         }
         mainScope.launch {
@@ -191,14 +200,19 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun stopSharing() {
+        val affected = buildList {
+            if (connectedClients.isNotEmpty()) {
+                add("EasierSpot\n" + connectedClients.joinToString("\n") { "• ${it.label}" })
+            }
+            if (externalClients.isNotEmpty()) {
+                add("External\n" + externalClients.joinToString("\n") { "• ${it.label}" })
+            }
+        }
         AlertDialog.Builder(this)
             .setTitle(R.string.stop_sharing_confirm_title)
             .setMessage(
-                if (connectedClients.isEmpty()) getString(R.string.stop_sharing_no_clients)
-                else getString(
-                    R.string.stop_sharing_with_clients,
-                    connectedClients.joinToString("\n") { "• ${it.label}" }
-                )
+                if (affected.isEmpty()) getString(R.string.stop_sharing_no_clients)
+                else getString(R.string.stop_sharing_with_clients, affected.joinToString("\n\n"))
             )
             .setNegativeButton(android.R.string.cancel, null)
             .setPositiveButton(R.string.stop_sharing) { _, _ ->
